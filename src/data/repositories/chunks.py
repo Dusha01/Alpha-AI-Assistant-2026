@@ -6,6 +6,7 @@ from sqlalchemy import delete, func, select
 
 from src.data.models.chunk import Chunk
 from src.data.repositories.base import BaseRepository
+from src.modules.knowledge.types import SearchHit
 
 
 class ChunkRepository(BaseRepository):
@@ -45,3 +46,28 @@ class ChunkRepository(BaseRepository):
             self.session.add(chunk)
         await self.session.flush()
         return len(chunks)
+
+    async def search_similar(self, query_vector: list[float], *, limit: int) -> list[SearchHit]:
+        distance = Chunk.embedding.cosine_distance(query_vector)
+        score = (1 - distance).label("score")
+        stmt = (
+            select(Chunk, score)
+            .where(
+                Chunk.embedding.is_not(None),
+                Chunk.include_in_rag.is_(True),
+            )
+            .order_by(distance)
+            .limit(limit)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            SearchHit(
+                title=chunk.title,
+                url=chunk.url,
+                body=chunk.body,
+                is_paid=chunk.is_paid,
+                score=float(row_score),
+                include_in_rag=chunk.include_in_rag,
+            )
+            for chunk, row_score in rows
+        ]

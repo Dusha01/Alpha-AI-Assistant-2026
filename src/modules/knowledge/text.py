@@ -30,3 +30,16 @@ def strip_html(value: str) -> str:
 
 def normalize_whitespace(value: str) -> str:
     return _WS_RE.sub(" ", value.strip())
+
+
+def benefit_one_liner(body: str, *, max_len: int = 160) -> str:
+    text = normalize_whitespace(body)
+    if not text:
+        return "полезный материал по теме"
+    for separator in (". ", "! ", "? ", "\n"):
+        if separator in text:
+            text = text.split(separator, 1)[0] + separator.strip()
+            break
+    if len(text) > max_len:
+        text = text[: max_len - 1].rstrip() + "…"
+    return text
