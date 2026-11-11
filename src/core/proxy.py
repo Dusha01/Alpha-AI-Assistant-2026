@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 _EMPTY_PROXY_VALUES = frozenset({"none", "null", "-", "off", "false"})
 
@@ -36,9 +35,9 @@ def log_telegram_proxy_mode(proxy_url: str | None) -> None:
 
     low = normalized.lower()
     if low.startswith(("socks5://", "socks5h://", "socks4://")):
-        logger.info("Telegram API: SOCKS-прокси %s", mask_proxy_url(normalized))
+        logger.info("Telegram API: SOCKS-прокси {}", mask_proxy_url(normalized))
     else:
-        logger.info("Telegram API: HTTP(S)-прокси %s", mask_proxy_url(normalized))
+        logger.info("Telegram API: HTTP(S)-прокси {}", mask_proxy_url(normalized))
 
 
 def build_telegram_httpx_client_kwargs(
