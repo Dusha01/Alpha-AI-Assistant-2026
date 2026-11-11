@@ -1,5 +1,5 @@
 from src.handlers.errors import handler_failure_key
-from src.handlers.text import COPY, START_BUTTONS
+from src.handlers.text import COPY, FEEDBACK_BUTTONS, START_BUTTONS
 
 
 def test_handler_texts_match_spec() -> None:
@@ -31,10 +31,34 @@ def test_handler_texts_match_spec() -> None:
         "Сообщение получилось длинным. Сформулируйте, пожалуйста, "
         "главный вопрос в одном-двух предложениях."
     )
+    assert COPY["answer_source"] == "Подробнее в материале «{material_name}»: {url}"
+    assert COPY["clarify"] == (
+        "Уточните, пожалуйста, что именно вас интересует: {variant_1} или {variant_2}?"
+    )
+    assert COPY["clarify_free"] == (
+        "Чтобы ответить точнее, расскажите чуть подробнее: о какой ситуации речь?"
+    )
+    assert COPY["not_found"] == (
+        "В материалах «Альфа-Курса» нет ответа на этот вопрос. Могу помочь "
+        "с вопросами о запуске бизнеса, учёте, налогах, маркетинге и продажах."
+    )
+    assert COPY["not_found_related"] == (
+        "Точного ответа в материалах нет, но вот что может быть полезно: "
+        "«{material_name}» — {benefit}. {url}"
+    )
+    assert COPY["feedback"] == "Ответ помог?"
+    assert COPY["feedback_no"] == (
+        "Спасибо, что сказали. Попробуйте переформулировать вопрос, и я поищу ещё раз."
+    )
+    assert COPY["error_llm"] == (
+        "Не получилось подготовить ответ, это техническая заминка. "
+        "Попробуйте, пожалуйста, ещё раз через минуту."
+    )
     assert START_BUTTONS == (
         "Задать вопрос",
         "Подобрать материалы",
         "Поставить напоминание",
     )
+    assert FEEDBACK_BUTTONS == (("Да", "feedback_yes"), ("Нет", "feedback_no"))
     assert handler_failure_key() == "error_general"
     assert COPY[handler_failure_key()].strip()

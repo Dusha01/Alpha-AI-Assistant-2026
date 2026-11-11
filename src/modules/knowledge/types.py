@@ -5,6 +5,16 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
+class SearchHit:
+    title: str
+    url: str | None
+    body: str
+    is_paid: bool
+    score: float
+    include_in_rag: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class ChunkDraft:
     material_type: str
     material_id: uuid.UUID

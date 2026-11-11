@@ -20,18 +20,37 @@ async def poll(settings: Settings) -> None:
     from aiogram import Bot, Dispatcher
     from aiogram.client.session.aiohttp import AiohttpSession
 
+    from src.data.database import create_engine, create_session_factory
     from src.handlers.errors import on_handler_error
     from src.handlers.handlers import build_router
+    from src.modules.knowledge.embedder import LazySentenceTransformerEmbedder
+    from src.modules.knowledge.llm import OpenAICompatibleLlm
+    from src.modules.knowledge.service import KnowledgeService
 
     session = AiohttpSession(proxy=settings.telegram_proxy_url)
     bot = Bot(token=settings.telegram_bot_token, session=session)
     dispatcher = Dispatcher()
-    dispatcher.include_router(build_router(settings))
+    engine = create_engine(settings.database_url_resolved)
+    session_factory = create_session_factory(engine)
+    knowledge = KnowledgeService(
+        settings=settings,
+        session_factory=session_factory,
+        embedder=LazySentenceTransformerEmbedder(settings.embedding_model),
+        llm=OpenAICompatibleLlm(
+            base_url=settings.llm_base_url,
+            api_key=settings.llm_api_key,
+            model=settings.llm_model,
+            fallback_model=settings.llm_fallback_model,
+            timeout_seconds=settings.llm_timeout_seconds,
+        ),
+    )
+    dispatcher.include_router(build_router(settings, knowledge))
     dispatcher.errors.register(on_handler_error)
     try:
         await dispatcher.start_polling(bot, handle_signals=False, close_bot_session=False)
     finally:
         await bot.session.close()
+        await engine.dispose()
 
 
 def _start_polling_if_configured(settings: Settings) -> asyncio.Task[None] | None:
