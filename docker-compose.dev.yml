@@ -27,7 +27,27 @@ services:
       start_period: 20s
     restart: unless-stopped
 
-  bot:
+  # bot:
+  #   build:
+  #     context: .
+  #     dockerfile: Docker/Dockerfile.dev
+  #   env_file:
+  #     - .env.dev
+  #   environment:
+  #     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  #     DATABASE_URL_HOST: ""
+  #   ports:
+  #     - "${API_PORT:-8000}:${API_PORT:-8000}"
+  #   volumes:
+  #     - ./src:/app/src
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   command: ["gunicorn", "-c", "src/core/gunicorn.conf.py", "src.core.app:app"]
+  #   restart: "no"
+
+  ingest:
+    profiles: ["tools"]
     build:
       context: .
       dockerfile: Docker/Dockerfile.dev
@@ -36,15 +56,17 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       DATABASE_URL_HOST: ""
-    ports:
-      - "${API_PORT:-8000}:${API_PORT:-8000}"
+      HF_HOME: /cache/huggingface
+      TRANSFORMERS_CACHE: /cache/huggingface
     volumes:
       - ./src:/app/src
+      - hf_cache:/cache/huggingface
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["gunicorn", "-c", "src/core/gunicorn.conf.py", "src.core.app:app"]
+    command: ["python", "-m", "src.modules.knowledge.ingest"]
     restart: "no"
 
 volumes:
   pgdata_dev:
+  hf_cache:

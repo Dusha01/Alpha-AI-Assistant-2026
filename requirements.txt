@@ -9,3 +9,4 @@ pydantic-settings==2.16.2
 gunicorn==23.0.0
 uvicorn==0.54.0
 loguru==0.7.3
+sentence-transformers==3.4.1

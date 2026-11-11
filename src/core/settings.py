@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     message_max_length: int = 1000
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    embedding_model: str = "intfloat/multilingual-e5-small"
+    platform_base_url: str = ""
+    ingest_chunk_size: int = 800
+    rag_top_k: int = 5
+    rag_score_threshold: float = 0.35
 
     @field_validator("telegram_proxy_url", mode="before")
     @classmethod
