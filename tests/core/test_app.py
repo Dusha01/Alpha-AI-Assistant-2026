@@ -23,6 +23,7 @@ async def test_health() -> None:
 async def test_lifespan_without_token_does_not_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "")
     monkeypatch.setenv("TELEGRAM_PROXY_URL", "")
+    monkeypatch.setattr("src.core.app.run_migrations", lambda database_url: None)
     messages = [
         {"type": "lifespan.startup"},
         {"type": "lifespan.shutdown"},

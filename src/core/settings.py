@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_proxy_url: str | None = None
     database_url: str = ""
+    database_url_host: str = ""
     app_env: str = "dev"
     debug: bool = False
     log_level: str = "INFO"
@@ -37,3 +38,7 @@ class Settings(BaseSettings):
         if parsed.scheme.lower() not in _PROXY_SCHEMES or not parsed.hostname:
             raise ValueError("TELEGRAM_PROXY_URL must be an http(s) or socks URL")
         return normalized
+
+    @property
+    def database_url_resolved(self) -> str:
+        return self.database_url_host or self.database_url

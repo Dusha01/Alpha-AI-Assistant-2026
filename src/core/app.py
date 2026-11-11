@@ -8,6 +8,7 @@ from loguru import logger
 from src.core.logging import log_bot_banner, setup_logging
 from src.core.proxy import log_telegram_proxy_mode
 from src.core.settings import Settings
+from src.data.migrate import run_migrations
 
 Receive = Callable[[], Awaitable[dict]]
 Send = Callable[[dict], Awaitable[None]]
@@ -33,10 +34,7 @@ async def poll(settings: Settings) -> None:
         await bot.session.close()
 
 
-def _start_polling_if_configured() -> asyncio.Task[None] | None:
-    settings = Settings()
-    setup_logging(settings.log_level, debug=settings.debug)
-    log_bot_banner(settings)
+def _start_polling_if_configured(settings: Settings) -> asyncio.Task[None] | None:
     if not settings.telegram_bot_token.strip():
         logger.error("TELEGRAM_BOT_TOKEN пуст. Опрос Telegram не запущен.")
         return None
@@ -46,10 +44,19 @@ def _start_polling_if_configured() -> asyncio.Task[None] | None:
 
 async def _lifespan(receive: Receive, send: Send) -> None:
     global _poll_task
+    settings = Settings()
+    setup_logging(settings.log_level, debug=settings.debug)
+    log_bot_banner(settings)
     while True:
         message = await receive()
         if message["type"] == "lifespan.startup":
-            _poll_task = _start_polling_if_configured()
+            try:
+                await asyncio.to_thread(run_migrations, settings.database_url_resolved)
+            except Exception as exc:
+                logger.exception("Не удалось применить миграции")
+                await send({"type": "lifespan.startup.failed", "message": str(exc)})
+                return
+            _poll_task = _start_polling_if_configured(settings)
             await send({"type": "lifespan.startup.complete"})
         elif message["type"] == "lifespan.shutdown":
             if _poll_task is not None:

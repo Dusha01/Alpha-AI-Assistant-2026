@@ -7,6 +7,23 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql+asyncpg://alfa:ci_only@localhost:5432/alfa_course
+      DATABASE_URL_TEST: postgresql+asyncpg://alfa:ci_only@localhost:5432/alfa_course
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: alfa
+          POSTGRES_PASSWORD: ci_only
+          POSTGRES_DB: alfa_course
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U alfa -d alfa_course"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,21 +37,7 @@ jobs:
         run: |
           ruff check src tests
           ruff format --check src tests
-      - name: Pytest
-        run: pytest
-
-    # Фаза 2 добавит сервис Postgres и pytest -m integration:
-    # services:
-    #   postgres:
-    #     image: pgvector/pgvector:pg17
-    #     env:
-    #       POSTGRES_USER: alfa
-    #       POSTGRES_PASSWORD: ci_only
-    #       POSTGRES_DB: alfa_course
-    #     ports:
-    #       - 5432:5432
-    #     options: >-
-    #       --health-cmd "pg_isready -U alfa -d alfa_course"
-    #       --health-interval 5s
-    #       --health-timeout 5s
-    #       --health-retries 20
+      - name: Unit tests
+        run: pytest -q -m "not integration"
+      - name: Integration tests
+        run: pytest -q -m integration

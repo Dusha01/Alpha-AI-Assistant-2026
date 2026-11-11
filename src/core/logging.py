@@ -93,6 +93,11 @@ def log_bot_banner(settings: object) -> None:
         getattr(settings, "api_host", ""),
         getattr(settings, "api_port", ""),
     )
-    logger.info("database={}", mask_database_url(str(getattr(settings, "database_url", ""))))
+    database_url = getattr(
+        settings,
+        "database_url_resolved",
+        getattr(settings, "database_url", ""),
+    )
+    logger.info("database={}", mask_database_url(str(database_url)))
     logger.info("telegram token={}", "задан" if token else "не задан")
     logger.info("handlers: start, help, unknown_command, smalltalk, non_text, callback")

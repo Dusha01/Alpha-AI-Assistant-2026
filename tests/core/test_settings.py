@@ -27,3 +27,26 @@ def test_http_and_empty_proxy_markers(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setenv("TELEGRAM_PROXY_URL", "off")
     assert Settings(_env_file=None).telegram_proxy_url is None
+
+
+def test_database_url_prefers_host_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+asyncpg://alfa:secret@postgres:5432/alfa_course",
+    )
+    monkeypatch.setenv(
+        "DATABASE_URL_HOST",
+        "postgresql+asyncpg://alfa:secret@localhost:5432/alfa_course",
+    )
+
+    assert Settings(_env_file=None).database_url_resolved.endswith("@localhost:5432/alfa_course")
+
+
+def test_database_url_falls_back_to_container_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+asyncpg://alfa:secret@postgres:5432/alfa_course",
+    )
+    monkeypatch.setenv("DATABASE_URL_HOST", "")
+
+    assert Settings(_env_file=None).database_url_resolved.endswith("@postgres:5432/alfa_course")

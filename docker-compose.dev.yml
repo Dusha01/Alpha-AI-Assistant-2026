@@ -33,6 +33,9 @@ services:
       dockerfile: Docker/Dockerfile.dev
     env_file:
       - .env.dev
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL_HOST: ""
     ports:
       - "${API_PORT:-8000}:${API_PORT:-8000}"
     volumes:
