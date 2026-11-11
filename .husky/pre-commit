@@ -1,0 +1,39 @@
+#!/usr/bin/env sh
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+
+if [ -z "$REPO_ROOT" ]; then
+	REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+fi
+
+cd "$REPO_ROOT" || exit 1
+
+STAGED_FILES="$(
+	git diff --cached --name-only --diff-filter=ACMR
+)"
+
+if [ -z "$STAGED_FILES" ]; then
+	echo "No staged files. Skipping pre-commit checks."
+	exit 0
+fi
+
+echo "Staged changes detected. Running ruff and pytest..."
+
+if [ ! -f ".venv/bin/activate" ]; then
+	echo ".venv not found. Install dependencies into .venv first."
+	exit 1
+fi
+
+# shellcheck disable=SC1091
+. ".venv/bin/activate"
+
+echo "Running ruff..."
+ruff check src tests
+ruff format --check src tests
+
+echo "Running pytest..."
+pytest -q
+
+echo "pre-commit checks passed."
+exit 0
