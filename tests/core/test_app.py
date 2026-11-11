@@ -79,11 +79,29 @@ async def test_polling_leaves_signals_to_the_server(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr("aiogram.Dispatcher", Dispatcher)
     monkeypatch.setattr("aiogram.client.session.aiohttp.AiohttpSession", Session)
 
+    class _Engine:
+        async def dispose(self) -> None:
+            captured["engine_disposed"] = True
+
+    class _Factory:
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr("src.data.database.create_engine", lambda database_url: _Engine())
+    monkeypatch.setattr(
+        "src.data.database.create_session_factory",
+        lambda engine: lambda: _Factory(),
+    )
+
     await poll(
         Settings(
             _env_file=None,
             telegram_bot_token="123:test",
             telegram_proxy_url=None,
+            database_url="postgresql+asyncpg://alfa:pass@localhost/alfa_course",
         )
     )
 

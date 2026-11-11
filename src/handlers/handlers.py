@@ -6,7 +6,8 @@ from loguru import logger
 
 from src.core.settings import Settings
 from src.handlers.incoming import reply_key
-from src.handlers.text import COPY, START_BUTTONS
+from src.handlers.text import COPY, FEEDBACK_BUTTONS, START_BUTTONS
+from src.modules.knowledge.service import BotReply, KnowledgeService
 
 _BUTTON_ACTIONS = ("ask", "materials", "remind")
 
@@ -23,6 +24,17 @@ def log_handler(
         logger.debug("text={}", text[:200])
 
 
+def feedback_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text=label, callback_data=data)
+                for label, data in FEEDBACK_BUTTONS
+            ]
+        ]
+    )
+
+
 def start_keyboard() -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=label, callback_data=action)]
@@ -31,7 +43,7 @@ def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_router(settings: Settings) -> Router:
+def build_router(settings: Settings, knowledge: KnowledgeService | None = None) -> Router:
     router = Router()
 
     @router.message(F.text)
@@ -42,6 +54,12 @@ def build_router(settings: Settings) -> Router:
             max_length=settings.message_max_length,
         )
         log_handler(key, message.chat.id, debug=settings.debug, text=message.text)
+        if key == "smalltalk" and knowledge is not None:
+            question = (message.text or "").strip()
+            reply: BotReply = await knowledge.answer_question(question)
+            markup = feedback_keyboard() if reply.feedback else None
+            await message.answer(reply.text, reply_markup=markup)
+            return
         markup = start_keyboard() if key == "start" else None
         await message.answer(COPY[key], reply_markup=markup)
 
@@ -49,6 +67,14 @@ def build_router(settings: Settings) -> Router:
     async def on_non_text(message: Message) -> None:
         log_handler("non_text", message.chat.id, debug=settings.debug)
         await message.answer(COPY["non_text"])
+
+    @router.callback_query(F.data == "feedback_no")
+    async def on_feedback_no(query: CallbackQuery) -> None:
+        chat_id = query.message.chat.id if query.message is not None else None
+        log_handler("feedback_no", chat_id, debug=settings.debug)
+        await query.answer()
+        if query.message is not None:
+            await query.message.answer(COPY["feedback_no"])
 
     @router.callback_query()
     async def on_button(query: CallbackQuery) -> None:
