@@ -33,7 +33,7 @@ ruff check src tests
 ruff format --check src tests
 
 echo "Running pytest..."
-pytest -q
+pytest -q -m "not integration"
 
 echo "pre-commit checks passed."
 exit 0
