@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     llm_model: str = ""
     llm_fallback_model: str = ""
     llm_timeout_seconds: float = 30.0
+    reminder_poll_interval_seconds: float = 15.0
+    reminder_timezone: str = "Asia/Vladivostok"
 
     @field_validator("telegram_proxy_url", mode="before")
     @classmethod

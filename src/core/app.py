@@ -28,6 +28,8 @@ async def poll(settings: Settings) -> None:
     from src.modules.knowledge.service import KnowledgeService
     from src.modules.profile.service import ProfileService
     from src.modules.recommend.service import RecommendService
+    from src.modules.reminders.poller import run_reminder_poller
+    from src.modules.reminders.service import ReminderService
 
     session = AiohttpSession(proxy=settings.telegram_proxy_url)
     bot = Bot(token=settings.telegram_bot_token, session=session)
@@ -48,11 +50,23 @@ async def poll(settings: Settings) -> None:
     )
     profiles = ProfileService(session_factory=session_factory)
     recommend = RecommendService(settings=settings, session_factory=session_factory)
-    dispatcher.include_router(build_router(settings, knowledge, profiles, recommend))
+    reminders = ReminderService(settings=settings, session_factory=session_factory)
+    dispatcher.include_router(build_router(settings, knowledge, profiles, recommend, reminders))
     dispatcher.errors.register(on_handler_error)
+    poller_task = asyncio.create_task(
+        run_reminder_poller(
+            bot,
+            session_factory,
+            reminder_service=reminders,
+            interval_seconds=settings.reminder_poll_interval_seconds,
+        )
+    )
     try:
         await dispatcher.start_polling(bot, handle_signals=False, close_bot_session=False)
     finally:
+        poller_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await poller_task
         await bot.session.close()
         await engine.dispose()
 
