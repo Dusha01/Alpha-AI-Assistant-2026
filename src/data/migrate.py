@@ -17,3 +17,13 @@ def run_migrations(database_url: str) -> None:
     )
     config.attributes["sqlalchemy_url"] = database_url
     command.upgrade(config, "head")
+
+
+def main() -> None:
+    from src.core.settings import Settings
+
+    run_migrations(Settings().database_url_resolved)
+
+
+if __name__ == "__main__":
+    main()

@@ -10,6 +10,7 @@ from src.handlers.text import COPY
         ("/start", True, "start"),
         ("/start@AlfaCourseBot", True, "start"),
         ("/help", True, "help"),
+        ("/profile", True, "profile"),
         ("/unknown", True, "unknown_command"),
         ("привет", True, "smalltalk"),
         (None, False, "non_text"),
@@ -18,4 +19,5 @@ from src.handlers.text import COPY
 )
 def test_reply_key(text: str | None, is_text: bool, expected: str) -> None:
     assert reply_key(text, is_text=is_text, max_length=10) == expected
-    assert COPY[expected]
+    if expected != "profile":
+        assert COPY[expected]

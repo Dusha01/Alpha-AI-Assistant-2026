@@ -71,6 +71,20 @@ def test_specific_question_skips_clarify_for_high_scores() -> None:
     assert outcome.kind == "answer"
 
 
+def test_vague_credit_question_skips_redundant_clarify() -> None:
+    outcome = decide_outcome(
+        [
+            _hit("Как выбрать кредит", 0.62, "как выбрать кредит для бизнеса"),
+            _hit("Кредит", 0.61, "что такое кредит для бизнеса"),
+        ],
+        question="что такое кредит?",
+        answer_threshold=0.35,
+        related_threshold=0.27,
+        clarify_gap=0.06,
+    )
+    assert outcome.kind == "answer"
+
+
 def test_followup_after_clarify_goes_to_answer() -> None:
     outcome = decide_outcome(
         [

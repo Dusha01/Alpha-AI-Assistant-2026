@@ -1,3 +1,4 @@
+import os
 from urllib.parse import urlsplit
 
 from pydantic import field_validator
@@ -6,11 +7,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from src.core.proxy import normalize_proxy_url
 
 _PROXY_SCHEMES = frozenset({"http", "https", "socks4", "socks5", "socks5h"})
+_ENV_FILE = ".env.prod" if os.getenv("APP_ENV", "").lower() == "prod" else ".env.dev"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env.dev",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
     )
