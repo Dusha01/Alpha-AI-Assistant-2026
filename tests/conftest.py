@@ -39,6 +39,24 @@ async def database_engine() -> AsyncIterator[AsyncEngine]:
 
 
 @pytest_asyncio.fixture
+def profile_session_factory(db_session: AsyncSession):
+    """Одна тестовая сессия для ProfileService (интеграционные FSM-тесты)."""
+
+    class _SessionCtx:
+        async def __aenter__(self) -> AsyncSession:
+            return db_session
+
+        async def __aexit__(self, *args: object) -> None:
+            await db_session.commit()
+
+    class _Maker:
+        def __call__(self) -> _SessionCtx:
+            return _SessionCtx()
+
+    return _Maker()
+
+
+@pytest_asyncio.fixture
 async def db_session(database_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
     async with database_engine.connect() as connection:
         transaction = await connection.begin()

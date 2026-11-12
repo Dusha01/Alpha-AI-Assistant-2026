@@ -7,6 +7,7 @@ from src.modules.knowledge.relevance import (
     is_vague_question,
     material_covers_question,
     question_aligns_with_title,
+    significant_terms,
 )
 from src.modules.knowledge.types import SearchHit
 
@@ -22,6 +23,18 @@ class SearchOutcome:
 
 def _title_key(title: str) -> str:
     return " ".join(title.lower().split())
+
+
+def _titles_are_same_topic(title_a: str, title_b: str) -> bool:
+    key_a = _title_key(title_a)
+    key_b = _title_key(title_b)
+    if key_a == key_b or key_a in key_b or key_b in key_a:
+        return True
+    terms_a = set(significant_terms(title_a))
+    terms_b = set(significant_terms(title_b))
+    if not terms_a or not terms_b:
+        return False
+    return terms_a <= terms_b or terms_b <= terms_a
 
 
 def decide_outcome(
@@ -52,11 +65,11 @@ def decide_outcome(
         if second.score >= answer_threshold and gap <= clarify_gap:
             first_key = _title_key(best.title)
             second_key = _title_key(second.title)
-            if first_key != second_key:
+            if first_key != second_key and not _titles_are_same_topic(best.title, second.title):
                 return SearchOutcome(
                     kind="clarify",
                     hits=ranked,
                     variants=(best.title, second.title),
                 )
-            return SearchOutcome(kind="clarify_free", hits=ranked)
+            return SearchOutcome(kind="answer", hits=ranked)
     return SearchOutcome(kind="answer", hits=ranked)

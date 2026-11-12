@@ -26,6 +26,7 @@ async def poll(settings: Settings) -> None:
     from src.modules.knowledge.embedder import LazySentenceTransformerEmbedder
     from src.modules.knowledge.llm import OpenAICompatibleLlm
     from src.modules.knowledge.service import KnowledgeService
+    from src.modules.profile.service import ProfileService
 
     session = AiohttpSession(proxy=settings.telegram_proxy_url)
     bot = Bot(token=settings.telegram_bot_token, session=session)
@@ -44,7 +45,8 @@ async def poll(settings: Settings) -> None:
             timeout_seconds=settings.llm_timeout_seconds,
         ),
     )
-    dispatcher.include_router(build_router(settings, knowledge))
+    profiles = ProfileService(session_factory=session_factory)
+    dispatcher.include_router(build_router(settings, knowledge, profiles))
     dispatcher.errors.register(on_handler_error)
     try:
         await dispatcher.start_polling(bot, handle_signals=False, close_bot_session=False)
