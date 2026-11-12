@@ -1,0 +1,12 @@
+aiogram==3.31.0
+sqlalchemy==2.1.8
+greenlet==3.5.6
+asyncpg==0.32.0
+alembic==1.20.1
+pgvector==0.5.1
+httpx==0.28.1
+pydantic-settings==2.16.2
+gunicorn==23.0.0
+uvicorn==0.54.0
+loguru==0.7.3
+sentence-transformers==3.4.1

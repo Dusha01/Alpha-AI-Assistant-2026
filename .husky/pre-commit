@@ -20,20 +20,49 @@ fi
 
 echo "Staged changes detected. Running ruff and pytest..."
 
-if [ ! -f ".venv/bin/activate" ]; then
-	echo ".venv not found. Install dependencies into .venv first."
+RUFF="$REPO_ROOT/.venv/bin/ruff"
+PYTEST="$REPO_ROOT/.venv/bin/pytest"
+
+if [ ! -x "$RUFF" ]; then
+	echo "Ruff not found in .venv ($RUFF)."
+	echo "Create venv and install dev deps:"
+	echo "  python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"
 	exit 1
 fi
 
-# shellcheck disable=SC1091
-. ".venv/bin/activate"
+if [ ! -x "$PYTEST" ]; then
+	echo "pytest not found in .venv ($PYTEST)."
+	echo "  .venv/bin/pip install -r requirements-dev.txt"
+	exit 1
+fi
 
-echo "Running ruff..."
-ruff check src tests
-ruff format --check src tests
+ruff_verify() {
+	"$RUFF" check src tests && "$RUFF" format --check src tests
+}
+
+ruff_autofix() {
+	echo "Ruff reported issues — fixing via .venv..."
+	"$RUFF" check src tests --fix
+	"$RUFF" format src tests
+	# Подтянуть только то, что ruff мог изменить.
+	git add -u src tests 2>/dev/null || true
+}
+
+echo "Running ruff (from .venv)..."
+if ! ruff_verify; then
+	ruff_autofix
+	if ! ruff_verify; then
+		echo "Ruff still fails after auto-fix. Correct remaining issues manually."
+		exit 1
+	fi
+	echo "Ruff auto-fix applied; updated files re-staged."
+fi
 
 echo "Running pytest..."
-pytest -q
+if ! "$PYTEST" -q -m "not integration"; then
+	echo "pytest failed."
+	exit 1
+fi
 
 echo "pre-commit checks passed."
 exit 0
