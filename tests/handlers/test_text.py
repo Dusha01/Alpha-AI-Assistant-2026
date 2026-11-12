@@ -4,12 +4,12 @@ from src.handlers.text import COPY, FEEDBACK_BUTTONS, START_BUTTONS
 
 def test_handler_texts_match_spec() -> None:
     assert COPY["start"] == (
-        "Здравствуйте! Я помощник «Альфа-Курса». Отвечаю на вопросы о запуске "
+        "👋 Здравствуйте! Я помощник «Альфа-Курса». Отвечаю на вопросы о запуске "
         "и ведении бизнеса по материалам платформы, подбираю полезные курсы "
         "и шаблоны и могу напомнить о важных датах. О чём хотите спросить?"
     )
     assert COPY["help"] == (
-        "Вот что я умею:\n"
+        "👋 Вот что я умею:\n"
         "— отвечать на вопросы по материалам «Альфа-Курса»;\n"
         "— подбирать материалы под ваш бизнес;\n"
         "— напоминать о налогах и обучении.\n"
@@ -62,3 +62,26 @@ def test_handler_texts_match_spec() -> None:
     assert FEEDBACK_BUTTONS == (("Да", "feedback_yes"), ("Нет", "feedback_no"))
     assert handler_failure_key() == "error_general"
     assert COPY[handler_failure_key()].strip()
+
+
+def test_friendly_lines_keep_one_emoji_and_spec_wording() -> None:
+    assert COPY["profile_saved"] == "✅ Запомнил: {что_запомнил}. Поменять можно в /profile."
+    assert COPY["reminder_created"].startswith("✅ Готово!")
+    assert COPY["tax_created"].startswith("✅ Готово:")
+    assert COPY["recommend_free"].startswith("📚 Советую")
+    assert COPY["recommend_paid"].startswith("📚 Если хотите")
+    assert COPY["recommend_route"].startswith("📚 Предлагаю")
+    assert COPY["recommend_cold"].startswith("📚 Вот с чего")
+    assert COPY["reminder_fire_course"].startswith("⏰ Напоминаю:")
+    assert COPY["reminder_fire_custom"].startswith("⏰ Напоминание:")
+    assert COPY["tax_fire"].startswith("⏰ Через")
+    assert COPY["clarify"].startswith("Уточните")
+    assert COPY["not_found"].startswith("В материалах")
+    assert COPY["error_llm"].startswith("Не получилось")
+    assert COPY["error_general"].startswith("Что-то пошло")
+    assert COPY["too_long"].startswith("Сообщение получилось")
+    assert START_BUTTONS == (
+        "Задать вопрос",
+        "Подобрать материалы",
+        "Поставить напоминание",
+    )

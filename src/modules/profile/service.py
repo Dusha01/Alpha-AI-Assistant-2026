@@ -13,6 +13,7 @@ from src.data.repositories.profiles import ProfileRepository
 from src.data.repositories.users import UserRepository
 from src.handlers.text import COPY
 from src.modules.profile import states
+from src.modules.profile.dialog_memory import payload_after_reset, payload_with_follow_up
 from src.modules.profile.keyboards import (
     profile_edit_keyboard,
     skip_keyboard,
@@ -64,6 +65,49 @@ class ProfileService:
             await DialogStateRepository(session).set_state(user_id, states.ASK_BUSINESS)
             await session.commit()
         return ProfileReply(COPY["ask_business"], skip_keyboard())
+
+    async def reset_dialog(self, user_id: uuid.UUID) -> None:
+        async with self.session_factory() as session:
+            repo = DialogStateRepository(session)
+            row = await repo.get_or_create(user_id)
+            await repo.set_state(
+                user_id,
+                states.IDLE,
+                payload=payload_after_reset(dict(row.payload)),
+            )
+            await session.commit()
+
+    async def remember_follow_up(
+        self,
+        user_id: uuid.UUID,
+        question: str,
+        material_title: str | None,
+    ) -> None:
+        async with self.session_factory() as session:
+            repo = DialogStateRepository(session)
+            row = await repo.get_or_create(user_id)
+            await repo.set_state(
+                user_id,
+                row.state,
+                payload=payload_with_follow_up(
+                    dict(row.payload),
+                    question=question,
+                    material_title=material_title,
+                ),
+            )
+            await session.commit()
+
+    async def follow_up_context(self, user_id: uuid.UUID) -> tuple[str | None, str | None]:
+        async with self.session_factory() as session:
+            row = await DialogStateRepository(session).get_by_user_id(user_id)
+        if row is None:
+            return None, None
+        question = row.payload.get("follow_question")
+        material = row.payload.get("follow_material")
+        return (
+            question if isinstance(question, str) and question.strip() else None,
+            material if isinstance(material, str) and material.strip() else None,
+        )
 
     async def is_in_dialog(self, user_id: uuid.UUID) -> bool:
         async with self.session_factory() as session:

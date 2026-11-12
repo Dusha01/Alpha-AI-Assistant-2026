@@ -1,3 +1,6 @@
+RESET_DIALOG_KEYS = frozenset({"start", "help", "profile", "reminders", "cancel"})
+
+
 def reply_key(text: str | None, *, is_text: bool, max_length: int) -> str:
     if not is_text:
         return "non_text"
@@ -13,6 +16,8 @@ def reply_key(text: str | None, *, is_text: bool, max_length: int) -> str:
         return "profile"
     if command == "/reminders":
         return "reminders"
+    if command == "/cancel":
+        return "cancel"
     if command.startswith("/"):
         return "unknown_command"
     if len(raw) > max_length:

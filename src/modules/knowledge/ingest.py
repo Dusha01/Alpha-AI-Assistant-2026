@@ -26,6 +26,7 @@ from src.modules.knowledge.embedder import (
 from src.modules.knowledge.sources import (
     article_chunk_drafts,
     embed_material_chunk_drafts,
+    landing_chunk_drafts,
     lesson_chunk_drafts,
 )
 from src.modules.knowledge.types import ChunkDraft
@@ -40,6 +41,9 @@ async def _fetch_articles(session: AsyncSession) -> list[dict[str, Any]]:
             a."Id" AS material_id,
             a."Title" AS title,
             a."Url" AS slug,
+            a."TitleTag" AS seo_title,
+            a."DescriptionTag" AS seo_description,
+            a."Description" AS description,
             e."HtmlContent" AS html,
             e."Order" AS item_order
         FROM public."Articles" AS a
@@ -60,6 +64,9 @@ async def _fetch_documents(session: AsyncSession) -> list[dict[str, Any]]:
             d."Id" AS material_id,
             d."Title" AS title,
             d."Url" AS slug,
+            d."TitleTag" AS seo_title,
+            d."DescriptionTag" AS seo_description,
+            d."Description" AS description,
             e."HtmlContent" AS html,
             e."Order" AS item_order
         FROM public."Documents" AS d
@@ -80,6 +87,9 @@ async def _fetch_glossary(session: AsyncSession) -> list[dict[str, Any]]:
             g."Id" AS material_id,
             g."Title" AS title,
             g."Url" AS slug,
+            g."TitleTag" AS seo_title,
+            g."DescriptionTag" AS seo_description,
+            g."Description" AS description,
             e."HtmlContent" AS html,
             e."Order" AS item_order
         FROM public."Glossary" AS g
@@ -102,6 +112,8 @@ async def _fetch_lessons(session: AsyncSession) -> list[dict[str, Any]]:
             l."Description" AS description,
             c."Url" AS course_slug,
             c."TypeId" AS course_type_id,
+            c."TitleTag" AS seo_title,
+            c."DescriptionTag" AS seo_description,
             e."HtmlContent" AS html,
             e."Order" AS item_order
         FROM public."Lessons" AS l
@@ -116,6 +128,33 @@ async def _fetch_lessons(session: AsyncSession) -> list[dict[str, Any]]:
     )
     result = await session.execute(query, {"status_id": str(PUBLISHED_STATUS_ID)})
     return [dict(row) for row in result.mappings()]
+
+
+async def _fetch_landings(session: AsyncSession) -> list[dict[str, Any]]:
+    query = text(
+        """
+        SELECT
+            l."Id" AS material_id,
+            l."Title" AS title,
+            l."Url" AS slug,
+            l."TitleTag" AS seo_title,
+            l."DescriptionTag" AS seo_description,
+            l."Description" AS description,
+            l."LandingDescription" AS landing_description
+        FROM public."Landings" AS l
+        WHERE l."StatusId" = :status_id
+          AND l."IsDeleted" = false
+        """
+    )
+    result = await session.execute(query, {"status_id": str(PUBLISHED_STATUS_ID)})
+    return [dict(row) for row in result.mappings()]
+
+
+def _text_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text_value = str(value).strip()
+    return text_value or None
 
 
 def _group_html(
@@ -144,6 +183,7 @@ def build_drafts_from_catalog(
     lessons: list[dict[str, Any]],
     base_url: str,
     chunk_size: int,
+    landings: list[dict[str, Any]] | None = None,
 ) -> list[ChunkDraft]:
     drafts: list[ChunkDraft] = []
     for meta in _group_html(articles).values():
@@ -155,6 +195,9 @@ def build_drafts_from_catalog(
                 embed_html_parts=meta["embed_html_parts"],
                 base_url=base_url,
                 chunk_size=chunk_size,
+                seo_title=_text_or_none(meta.get("seo_title")),
+                seo_description=_text_or_none(meta.get("seo_description")),
+                description=_text_or_none(meta.get("description")),
             )
         )
     for meta in _group_html(documents).values():
@@ -167,6 +210,9 @@ def build_drafts_from_catalog(
                 embed_html_parts=meta["embed_html_parts"],
                 base_url=base_url,
                 chunk_size=chunk_size,
+                seo_title=_text_or_none(meta.get("seo_title")),
+                seo_description=_text_or_none(meta.get("seo_description")),
+                description=_text_or_none(meta.get("description")),
             )
         )
     for meta in _group_html(glossary).values():
@@ -179,6 +225,9 @@ def build_drafts_from_catalog(
                 embed_html_parts=meta["embed_html_parts"],
                 base_url=base_url,
                 chunk_size=chunk_size,
+                seo_title=_text_or_none(meta.get("seo_title")),
+                seo_description=_text_or_none(meta.get("seo_description")),
+                description=_text_or_none(meta.get("description")),
             )
         )
     for meta in _group_html(lessons).values():
@@ -191,12 +240,30 @@ def build_drafts_from_catalog(
             lesson_chunk_drafts(
                 lesson_id=meta["material_id"],
                 title=str(meta["title"]),
-                description=meta.get("description"),
+                description=_text_or_none(meta.get("description")),
                 course_slug=meta.get("course_slug"),
                 is_paid_course=is_paid_course_type(course_type_id),
                 embed_html_parts=meta["embed_html_parts"],
                 base_url=base_url,
                 chunk_size=chunk_size,
+                seo_title=_text_or_none(meta.get("seo_title")),
+                seo_description=_text_or_none(meta.get("seo_description")),
+            )
+        )
+    for meta in landings or []:
+        material_id = meta["material_id"]
+        if not isinstance(material_id, uuid.UUID):
+            material_id = uuid.UUID(str(material_id))
+        drafts.extend(
+            landing_chunk_drafts(
+                landing_id=material_id,
+                title=str(meta["title"]),
+                slug=meta.get("slug"),
+                base_url=base_url,
+                seo_title=_text_or_none(meta.get("seo_title")),
+                seo_description=_text_or_none(meta.get("seo_description")),
+                description=_text_or_none(meta.get("description")),
+                landing_description=_text_or_none(meta.get("landing_description")),
             )
         )
     return drafts
@@ -246,11 +313,13 @@ async def ingest_catalog(
     documents = await _fetch_documents(session)
     glossary = await _fetch_glossary(session)
     lessons = await _fetch_lessons(session)
+    landings = await _fetch_landings(session)
     drafts = build_drafts_from_catalog(
         articles=articles,
         documents=documents,
         glossary=glossary,
         lessons=lessons,
+        landings=landings,
         base_url=settings.platform_base_url,
         chunk_size=settings.ingest_chunk_size,
     )

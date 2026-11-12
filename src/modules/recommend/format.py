@@ -8,7 +8,7 @@ from src.modules.recommend.utm import with_utm
 
 def _link(base_url: str, item: CatalogItem) -> str:
     raw = material_url(base_url, item.slug) or item.slug
-    return with_utm(raw)
+    return with_utm(raw, campaign="recommend", content=item.slug)
 
 
 def format_plan(plan: RecommendationPlan, *, base_url: str) -> tuple[str, ...]:

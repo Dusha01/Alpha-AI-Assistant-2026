@@ -12,6 +12,8 @@ from src.handlers.text import COPY
         ("/help", True, "help"),
         ("/profile", True, "profile"),
         ("/reminders", True, "reminders"),
+        ("/cancel", True, "cancel"),
+        ("/cancel@AlfaCourseBot", True, "cancel"),
         ("/unknown", True, "unknown_command"),
         ("привет", True, "smalltalk"),
         (None, False, "non_text"),
