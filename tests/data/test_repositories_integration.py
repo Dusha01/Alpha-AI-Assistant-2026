@@ -68,6 +68,22 @@ async def test_profile_all_fields_nullable(db_session: AsyncSession) -> None:
     assert profile.mode is None
 
 
+async def test_profile_skip_does_not_erase_existing_mode(db_session: AsyncSession) -> None:
+    from src.data.repositories.dialog_states import DialogStateRepository
+    from src.modules.profile import states
+
+    users = UserRepository(db_session)
+    profiles = ProfileRepository(db_session)
+    dialogs = DialogStateRepository(db_session)
+    user = await users.create(telegram_id=100000005)
+    await profiles.upsert(user.id, mode=TaxMode.USN)
+    await dialogs.set_state(user.id, states.ASK_STAGE)
+
+    updated = await profiles.get_by_user_id(user.id)
+    assert updated is not None
+    assert updated.mode == TaxMode.USN
+
+
 async def test_migrations_created_app_tables(db_session: AsyncSession) -> None:
     result = await db_session.execute(
         text(
