@@ -25,6 +25,7 @@ from src.modules.profile.labels import (
     format_profile_show,
     is_profile_empty,
     mode_label,
+    profile_needs_sphere,
     stage_label,
 )
 from src.modules.profile.parse import parse_business_line
@@ -50,9 +51,13 @@ class ProfileService:
         async with self.session_factory() as session:
             profile = await ProfileRepository(session).get_by_user_id(user_id)
             dialog = await DialogStateRepository(session).get_by_user_id(user_id)
-            if not is_profile_empty(profile):
+            if dialog is not None and dialog.state in states.ACTIVE_STATES:
                 return False
-            return dialog is None or dialog.state == states.IDLE
+            if profile is None or is_profile_empty(profile):
+                return True
+            if profile_needs_sphere(profile):
+                return True
+            return False
 
     async def start_business_prompt(self, user_id: uuid.UUID) -> ProfileReply:
         async with self.session_factory() as session:
