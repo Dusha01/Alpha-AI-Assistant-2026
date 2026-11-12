@@ -12,4 +12,4 @@ if ! grep -Eq '^POSTGRES_PASSWORD=.+$' .env.prod; then
   exit 1
 fi
 
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --wait
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build --wait
