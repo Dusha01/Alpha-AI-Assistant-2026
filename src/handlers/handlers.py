@@ -1,5 +1,7 @@
 # Слой контракта. Хендлеры делегируют разбор входящего сообщения и не содержат правил.
 
+import uuid
+
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
@@ -9,6 +11,7 @@ from src.handlers.incoming import reply_key
 from src.handlers.text import COPY, FEEDBACK_BUTTONS, START_BUTTONS
 from src.modules.knowledge.service import BotReply, KnowledgeService
 from src.modules.profile.service import ProfileService
+from src.modules.recommend.service import RecommendReply, RecommendService
 
 _BUTTON_ACTIONS = ("ask", "materials", "remind")
 
@@ -36,6 +39,22 @@ def feedback_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+async def deliver_recommendations(
+    message: Message,
+    user_id: uuid.UUID,
+    recommend: RecommendService | None,
+    *,
+    prefer_route: bool = False,
+) -> None:
+    if recommend is None:
+        return
+    pack: RecommendReply = await recommend.recommend_for_user(user_id, prefer_route=prefer_route)
+    for text in pack.messages:
+        await message.answer(text)
+    if pack.next_step:
+        await message.answer(pack.next_step)
+
+
 def start_keyboard() -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=label, callback_data=action)]
@@ -48,6 +67,7 @@ def build_router(
     settings: Settings,
     knowledge: KnowledgeService | None = None,
     profile: ProfileService | None = None,
+    recommend: RecommendService | None = None,
 ) -> Router:
     router = Router()
 
@@ -69,6 +89,8 @@ def build_router(
                 reply = await profile.handle_text(user, (message.text or "").strip())
                 if reply is not None:
                     await message.answer(reply.text, reply_markup=reply.markup)
+                    if recommend is not None and not await profile.is_in_dialog(user.id):
+                        await deliver_recommendations(message, user.id, recommend)
                     return
         if (
             key == "smalltalk"
@@ -79,17 +101,21 @@ def build_router(
             user = await profile.ensure_user(message.from_user.id, message.from_user.username)
             question = (message.text or "").strip()
             reply: BotReply = await knowledge.answer_question(question)
-            markup = feedback_keyboard() if reply.feedback else None
-            await message.answer(reply.text, reply_markup=markup)
-            if reply.feedback and await profile.should_offer_business_prompt(user.id):
-                follow = await profile.start_business_prompt(user.id)
-                await message.answer(follow.text, reply_markup=follow.markup)
+            await message.answer(reply.text)
+            if reply.feedback:
+                if recommend is not None:
+                    await recommend.remember_topic(user.id, question)
+                await message.answer(COPY["feedback"], reply_markup=feedback_keyboard())
+                if await profile.should_offer_business_prompt(user.id):
+                    follow = await profile.start_business_prompt(user.id)
+                    await message.answer(follow.text, reply_markup=follow.markup)
             return
         if key == "smalltalk" and knowledge is not None:
             question = (message.text or "").strip()
             reply = await knowledge.answer_question(question)
-            markup = feedback_keyboard() if reply.feedback else None
-            await message.answer(reply.text, reply_markup=markup)
+            await message.answer(reply.text)
+            if reply.feedback:
+                await message.answer(COPY["feedback"], reply_markup=feedback_keyboard())
             return
         markup = start_keyboard() if key == "start" else None
         await message.answer(COPY[key], reply_markup=markup)
@@ -98,6 +124,12 @@ def build_router(
     async def on_non_text(message: Message) -> None:
         log_handler("non_text", message.chat.id, debug=settings.debug)
         await message.answer(COPY["non_text"])
+
+    @router.callback_query(F.data == "feedback_yes")
+    async def on_feedback_yes(query: CallbackQuery) -> None:
+        chat_id = query.message.chat.id if query.message is not None else None
+        log_handler("feedback_yes", chat_id, debug=settings.debug)
+        await query.answer("Спасибо за отзыв!")
 
     @router.callback_query(F.data == "feedback_no")
     async def on_feedback_no(query: CallbackQuery) -> None:
@@ -123,11 +155,32 @@ def build_router(
         await query.answer()
         if reply is not None and query.message is not None:
             await query.message.answer(reply.text, reply_markup=reply.markup)
+            if (
+                recommend is not None
+                and profile is not None
+                and query.data
+                and (query.data.startswith("profile_mode:") or query.data == "profile_skip")
+                and not await profile.is_in_dialog(user.id)
+            ):
+                await deliver_recommendations(query.message, user.id, recommend)
 
     @router.callback_query()
     async def on_button(query: CallbackQuery) -> None:
         chat_id = query.message.chat.id if query.message is not None else None
         log_handler("callback", chat_id, debug=settings.debug, text=query.data)
         await query.answer()
+        if (
+            query.data == "materials"
+            and recommend is not None
+            and profile is not None
+            and query.from_user is not None
+            and query.message is not None
+        ):
+            user = await profile.ensure_user(query.from_user.id, query.from_user.username)
+            await deliver_recommendations(query.message, user.id, recommend, prefer_route=True)
+        if query.data == "remind" and query.message is not None:
+            await query.message.answer(
+                "Напишите, о чём напомнить — например: «Напомни в пятницу продолжить курс»."
+            )
 
     return router

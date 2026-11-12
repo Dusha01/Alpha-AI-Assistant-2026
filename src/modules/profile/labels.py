@@ -50,6 +50,13 @@ def is_profile_empty(profile: Profile | None) -> bool:
     return profile.sphere is None and profile.stage is None and profile.mode is None
 
 
+def profile_needs_sphere(profile: Profile | None) -> bool:
+    if profile is None:
+        return True
+    sphere = profile.sphere
+    return sphere is None or not sphere.strip()
+
+
 def format_profile_show(profile: Profile) -> str:
     return (
         "Вот что я знаю о вашем бизнесе:\n"
