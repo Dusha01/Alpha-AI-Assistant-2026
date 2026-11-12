@@ -93,3 +93,6 @@ def test_links_include_utm() -> None:
     plan = plan_recommendations(profile, topic="usn", catalog=TEST_CATALOG)
     text = "\n".join(format_plan(plan, base_url="https://example.test"))
     assert "utm_source=tg_bot" in text
+    assert "utm_medium=telegram" in text
+    assert "utm_campaign=recommend" in text
+    assert "utm_content=usn-income-template" in text

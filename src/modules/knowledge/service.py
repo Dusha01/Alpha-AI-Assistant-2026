@@ -15,12 +15,14 @@ from src.modules.knowledge.llm import LlmClient, LlmNotConfiguredError, LlmReque
 from src.modules.knowledge.prompt import build_llm_messages
 from src.modules.knowledge.text import benefit_one_liner
 from src.modules.knowledge.types import SearchHit
+from src.modules.recommend.utm import slug_from_url, with_utm
 
 
 @dataclass(frozen=True, slots=True)
 class BotReply:
     text: str
     feedback: bool = False
+    material_title: str | None = None
 
 
 class KnowledgeService:
@@ -37,8 +39,8 @@ class KnowledgeService:
         self.embedder = embedder
         self.llm = llm
 
-    async def answer_question(self, question: str) -> BotReply:
-        hits = await self.search(question)
+    async def answer_question(self, question: str, *, search_query: str | None = None) -> BotReply:
+        hits = await self.search(search_query or question)
         return await self.answer_from_hits(question, hits)
 
     async def search(self, question: str) -> list[SearchHit]:
@@ -81,8 +83,9 @@ class KnowledgeService:
                 COPY["not_found_related"].format(
                     material_name=hit.title,
                     benefit=benefit_one_liner(hit.body),
-                    url=hit.url or "—",
-                )
+                    url=_public_url(hit.url),
+                ),
+                material_title=hit.title,
             )
         if outcome.kind == "clarify" and outcome.variants is not None:
             variant_1, variant_2 = outcome.variants
@@ -103,13 +106,19 @@ class KnowledgeService:
             logger.warning("LLM недоступен: {}", exc)
             return BotReply(COPY["error_llm"])
         primary = hits[0]
-        url = primary.url or "—"
+        url = _public_url(primary.url)
         if _should_append_source(llm_text, primary.title, url):
             source = COPY["answer_source"].format(material_name=primary.title, url=url)
             text = f"{llm_text}\n\n{source}"
         else:
             text = llm_text
-        return BotReply(text, feedback=True)
+        return BotReply(text, feedback=True, material_title=primary.title)
+
+
+def _public_url(url: str | None) -> str:
+    if not url:
+        return "—"
+    return with_utm(url, campaign="answer", content=slug_from_url(url))
 
 
 def _should_append_source(llm_text: str, material_name: str, url: str) -> bool:

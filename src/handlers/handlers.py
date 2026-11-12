@@ -7,8 +7,10 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from loguru import logger
 
 from src.core.settings import Settings
-from src.handlers.incoming import reply_key
+from src.handlers.incoming import RESET_DIALOG_KEYS, reply_key
+from src.handlers.telegram_text import split_telegram_text
 from src.handlers.text import COPY, FEEDBACK_BUTTONS, START_BUTTONS
+from src.modules.knowledge.follow_up import queries_for_turn
 from src.modules.knowledge.service import BotReply, KnowledgeService
 from src.modules.profile.service import ProfileService
 from src.modules.recommend.service import RecommendReply, RecommendService
@@ -65,6 +67,41 @@ def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+async def deliver_knowledge(
+    message: Message,
+    knowledge: KnowledgeService,
+    profile: ProfileService | None,
+    recommend: RecommendService | None,
+    user_id: uuid.UUID | None,
+) -> None:
+    previous_question = None
+    previous_material = None
+    if profile is not None and user_id is not None:
+        previous_question, previous_material = await profile.follow_up_context(user_id)
+    question, search_query = queries_for_turn(
+        (message.text or "").strip(),
+        previous_question=previous_question,
+        previous_material=previous_material,
+    )
+    reply: BotReply = await knowledge.answer_question(question, search_query=search_query)
+    for part in split_telegram_text(reply.text):
+        await message.answer(part)
+    if reply.material_title and profile is not None and user_id is not None:
+        await profile.remember_follow_up(user_id, question, reply.material_title)
+    if not reply.feedback:
+        return
+    if recommend is not None and user_id is not None:
+        await recommend.remember_topic(user_id, question)
+    await message.answer(COPY["feedback"], reply_markup=feedback_keyboard())
+    if (
+        profile is not None
+        and user_id is not None
+        and await profile.should_offer_business_prompt(user_id)
+    ):
+        follow = await profile.start_business_prompt(user_id)
+        await message.answer(follow.text, reply_markup=follow.markup)
+
+
 def build_router(
     settings: Settings,
     knowledge: KnowledgeService | None = None,
@@ -82,16 +119,19 @@ def build_router(
             max_length=settings.message_max_length,
         )
         log_handler(key, message.chat.id, debug=settings.debug, text=message.text)
-        if message.from_user is not None:
-            user = None
-            if profile is not None:
-                user = await profile.ensure_user(message.from_user.id, message.from_user.username)
-            if key == "reminders" and reminders is not None and user is not None:
-                reply = await reminders.list_reminders(user.id)
-                await message.answer(reply.text, reply_markup=reply.markup)
-                return
+        user = None
         if profile is not None and message.from_user is not None:
             user = await profile.ensure_user(message.from_user.id, message.from_user.username)
+            if key in RESET_DIALOG_KEYS:
+                await profile.reset_dialog(user.id)
+        if key == "cancel":
+            await message.answer(COPY["cancel"], reply_markup=start_keyboard())
+            return
+        if key == "reminders" and reminders is not None and user is not None:
+            reply = await reminders.list_reminders(user.id)
+            await message.answer(reply.text, reply_markup=reply.markup)
+            return
+        if profile is not None and user is not None:
             if key == "profile":
                 reply = await profile.show_profile(user.id)
                 await message.answer(reply.text, reply_markup=reply.markup)
@@ -124,25 +164,12 @@ def build_router(
             and knowledge is not None
             and profile is not None
             and message.from_user
+            and user is not None
         ):
-            user = await profile.ensure_user(message.from_user.id, message.from_user.username)
-            question = (message.text or "").strip()
-            reply: BotReply = await knowledge.answer_question(question)
-            await message.answer(reply.text)
-            if reply.feedback:
-                if recommend is not None:
-                    await recommend.remember_topic(user.id, question)
-                await message.answer(COPY["feedback"], reply_markup=feedback_keyboard())
-                if await profile.should_offer_business_prompt(user.id):
-                    follow = await profile.start_business_prompt(user.id)
-                    await message.answer(follow.text, reply_markup=follow.markup)
+            await deliver_knowledge(message, knowledge, profile, recommend, user.id)
             return
         if key == "smalltalk" and knowledge is not None:
-            question = (message.text or "").strip()
-            reply = await knowledge.answer_question(question)
-            await message.answer(reply.text)
-            if reply.feedback:
-                await message.answer(COPY["feedback"], reply_markup=feedback_keyboard())
+            await deliver_knowledge(message, knowledge, profile, recommend, None)
             return
         markup = start_keyboard() if key == "start" else None
         await message.answer(COPY[key], reply_markup=markup)
@@ -239,6 +266,9 @@ def build_router(
         chat_id = query.message.chat.id if query.message is not None else None
         log_handler("callback", chat_id, debug=settings.debug, text=query.data)
         await query.answer()
+        if query.data in _BUTTON_ACTIONS and profile is not None and query.from_user is not None:
+            user = await profile.ensure_user(query.from_user.id, query.from_user.username)
+            await profile.reset_dialog(user.id)
         if (
             query.data == "materials"
             and recommend is not None

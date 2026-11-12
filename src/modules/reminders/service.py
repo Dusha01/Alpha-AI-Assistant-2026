@@ -19,7 +19,8 @@ from src.data.repositories.users import UserRepository
 from src.handlers.text import COPY
 from src.modules.knowledge.catalog import material_url
 from src.modules.profile import states as profile_states
-from src.modules.recommend.utm import with_utm
+from src.modules.profile.dialog_memory import payload_after_reset
+from src.modules.recommend.utm import slug_from_url, with_utm
 from src.modules.reminders import states
 from src.modules.reminders.formatters import format_confirm, format_reminders_list, format_tax_offer
 from src.modules.reminders.keyboards import (
@@ -37,6 +38,14 @@ _PAYLOAD_REPEAT = "reminder_repeat"
 _PAYLOAD_TAX = "tax_deadline_id"
 
 _TAX_INTENT = re.compile(r"^напомни.*налог", re.IGNORECASE | re.DOTALL)
+
+
+def _reminder_link(reminder: object) -> str | None:
+    raw = getattr(reminder, "material_url", None)
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    campaign = "tax" if getattr(reminder, "is_tax", False) else "reminder"
+    return with_utm(raw, campaign=campaign, content=slug_from_url(raw))
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +94,8 @@ class ReminderService:
     ) -> ReminderReply:
         async with self.session_factory() as session:
             dialog_repo = DialogStateRepository(session)
-            payload: dict[str, object] = {}
+            existing = await dialog_repo.get_or_create(user_id)
+            payload = payload_after_reset(dict(existing.payload))
             if initial_text:
                 payload[_PAYLOAD_TEXT] = initial_text
                 await dialog_repo.set_state(user_id, states.REMINDER_WHEN, payload=payload)
@@ -186,7 +196,11 @@ class ReminderService:
                 repeat=repeat,
                 next_fire_at=when,
             )
-            await DialogStateRepository(session).set_state(user_id, profile_states.IDLE, payload={})
+            await DialogStateRepository(session).set_state(
+                user_id,
+                profile_states.IDLE,
+                payload=payload_after_reset(dict(payload)),
+            )
             await session.commit()
         return ReminderReply(COPY["reminder_created"])
 
@@ -206,12 +220,14 @@ class ReminderService:
                 mode, on_or_after=date.today()
             )
             if deadline is None:
+                kept = payload_after_reset(dict(dialog.payload))
                 await DialogStateRepository(session).set_state(
-                    user_id, profile_states.IDLE, payload={}
+                    user_id, profile_states.IDLE, payload=kept
                 )
                 await session.commit()
                 return ReminderReply(COPY["tax_no_data"].format(режим=mode.value))
-            payload = {_PAYLOAD_TAX: str(deadline.id)}
+            payload = payload_after_reset(dict(dialog.payload))
+            payload[_PAYLOAD_TAX] = str(deadline.id)
             await DialogStateRepository(session).set_state(
                 user_id, states.REMINDER_CONFIRM, payload=payload
             )
@@ -225,11 +241,15 @@ class ReminderService:
     async def start_tax_flow(self, user_id: uuid.UUID) -> ReminderReply:
         async with self.session_factory() as session:
             profile = await ProfileRepository(session).get_by_user_id(user_id)
+            dialog_repo = DialogStateRepository(session)
             if profile is None or profile.mode is None:
-                await DialogStateRepository(session).set_state(
+                existing = await dialog_repo.get_or_create(user_id)
+                pending = payload_after_reset(dict(existing.payload))
+                pending["tax_reminder_pending"] = True
+                await dialog_repo.set_state(
                     user_id,
                     profile_states.ASK_TAX,
-                    payload={"tax_reminder_pending": True},
+                    payload=pending,
                 )
                 await session.commit()
                 from src.modules.profile.keyboards import tax_keyboard
@@ -242,10 +262,10 @@ class ReminderService:
             if deadline is None:
                 await session.commit()
                 return ReminderReply(COPY["tax_no_data"].format(режим=mode.value))
-            payload = {_PAYLOAD_TAX: str(deadline.id)}
-            await DialogStateRepository(session).set_state(
-                user_id, states.REMINDER_CONFIRM, payload=payload
-            )
+            existing = await dialog_repo.get_or_create(user_id)
+            payload = payload_after_reset(dict(existing.payload))
+            payload[_PAYLOAD_TAX] = str(deadline.id)
+            await dialog_repo.set_state(user_id, states.REMINDER_CONFIRM, payload=payload)
             await session.commit()
         due = deadline.due_date.strftime("%d.%m.%Y")
         return ReminderReply(
@@ -270,7 +290,8 @@ class ReminderService:
                 tzinfo=UTC,
             )
             base = self.settings.platform_base_url or "https://example.alfacourse.local"
-            url = with_utm(material_url(base, deadline.material_slug) or base)
+            raw_url = material_url(base, deadline.material_slug) or base
+            url = with_utm(raw_url, campaign="tax", content=deadline.material_slug)
             await ReminderRepository(session).create(
                 user_id,
                 text=deadline.what_to_pay,
@@ -280,7 +301,11 @@ class ReminderService:
                 material_url=url,
                 is_tax=True,
             )
-            await DialogStateRepository(session).set_state(user_id, profile_states.IDLE, payload={})
+            await DialogStateRepository(session).set_state(
+                user_id,
+                profile_states.IDLE,
+                payload=payload_after_reset(dict(dialog.payload)),
+            )
             await session.commit()
         return ReminderReply(
             COPY["tax_created"].format(режим=profile.mode.value, N=deadline.lead_days)
@@ -314,10 +339,11 @@ class ReminderService:
         return ReminderReply(COPY["reminder_changed"].format(новая_частота=labels[repeat]))
 
     def fire_message(self, reminder) -> tuple[str, InlineKeyboardMarkup]:
-        if reminder.material_title and reminder.material_url:
+        link = _reminder_link(reminder)
+        if reminder.material_title and link:
             text = COPY["reminder_fire_course"].format(
                 имя_материала=reminder.material_title,
-                ссылка=reminder.material_url,
+                ссылка=link,
             )
         elif reminder.is_tax:
             text = COPY["reminder_fire_custom"].format(текст_напоминания=reminder.text)

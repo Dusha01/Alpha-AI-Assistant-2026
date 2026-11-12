@@ -79,8 +79,15 @@ async def test_answer_appends_source_and_feedback_flag() -> None:
         ],
     )
     assert reply.feedback is True
+    assert reply.material_title == "Учёт на УСН"
     assert "Короткий ответ из модели." in reply.text
     assert "Подробнее в материале «Учёт на УСН»" in reply.text
+    assert "utm_campaign=answer" in reply.text
+    assert "utm_content=usn" in reply.text
+    assert llm.last_messages is not None
+    prompt = "\n".join(item["content"] for item in llm.last_messages)
+    assert "Как вести учёт доходов на УСН?" in prompt
+    assert "utm_campaign" not in prompt
 
 
 @pytest.mark.asyncio
