@@ -11,6 +11,8 @@ def reply_key(text: str | None, *, is_text: bool, max_length: int) -> str:
         return "help"
     if command == "/profile":
         return "profile"
+    if command == "/reminders":
+        return "reminders"
     if command.startswith("/"):
         return "unknown_command"
     if len(raw) > max_length:

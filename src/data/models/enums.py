@@ -13,3 +13,16 @@ class TaxMode(StrEnum):
     NPD = "npd"
     OTHER = "other"
     UNKNOWN = "unknown"
+
+
+class ReminderRepeat(StrEnum):
+    ONCE = "once"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+    QUARTERLY = "quarterly"
+
+
+class ReminderStatus(StrEnum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    DONE = "done"

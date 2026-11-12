@@ -12,6 +12,8 @@ from src.handlers.text import COPY, FEEDBACK_BUTTONS, START_BUTTONS
 from src.modules.knowledge.service import BotReply, KnowledgeService
 from src.modules.profile.service import ProfileService
 from src.modules.recommend.service import RecommendReply, RecommendService
+from src.modules.reminders.keyboards import REPEAT_BUTTONS
+from src.modules.reminders.service import ReminderService
 
 _BUTTON_ACTIONS = ("ask", "materials", "remind")
 
@@ -68,6 +70,7 @@ def build_router(
     knowledge: KnowledgeService | None = None,
     profile: ProfileService | None = None,
     recommend: RecommendService | None = None,
+    reminders: ReminderService | None = None,
 ) -> Router:
     router = Router()
 
@@ -79,12 +82,25 @@ def build_router(
             max_length=settings.message_max_length,
         )
         log_handler(key, message.chat.id, debug=settings.debug, text=message.text)
+        if message.from_user is not None:
+            user = None
+            if profile is not None:
+                user = await profile.ensure_user(message.from_user.id, message.from_user.username)
+            if key == "reminders" and reminders is not None and user is not None:
+                reply = await reminders.list_reminders(user.id)
+                await message.answer(reply.text, reply_markup=reply.markup)
+                return
         if profile is not None and message.from_user is not None:
             user = await profile.ensure_user(message.from_user.id, message.from_user.username)
             if key == "profile":
                 reply = await profile.show_profile(user.id)
                 await message.answer(reply.text, reply_markup=reply.markup)
                 return
+            if reminders is not None and await reminders.is_in_dialog(user.id):
+                reply = await reminders.handle_text(user.id, (message.text or "").strip())
+                if reply is not None:
+                    await message.answer(reply.text, reply_markup=reply.markup)
+                    return
             if await profile.is_in_dialog(user.id):
                 reply = await profile.handle_text(user, (message.text or "").strip())
                 if reply is not None:
@@ -92,6 +108,17 @@ def build_router(
                     if recommend is not None and not await profile.is_in_dialog(user.id):
                         await deliver_recommendations(message, user.id, recommend)
                     return
+        if (
+            key == "smalltalk"
+            and reminders is not None
+            and profile is not None
+            and message.from_user
+            and reminders.is_reminder_intent((message.text or "").strip())
+        ):
+            user = await profile.ensure_user(message.from_user.id, message.from_user.username)
+            reply = await reminders.start_quick(user.id, (message.text or "").strip())
+            await message.answer(reply.text, reply_markup=reply.markup)
+            return
         if (
             key == "smalltalk"
             and knowledge is not None
@@ -139,6 +166,41 @@ def build_router(
         if query.message is not None:
             await query.message.answer(COPY["feedback_no"])
 
+    @router.callback_query(F.data.startswith(("reminder_", "tax_remind:", "remind_")))
+    async def on_reminder_button(query: CallbackQuery) -> None:
+        if reminders is None or query.from_user is None or query.data is None:
+            await query.answer()
+            return
+        user = await reminders.ensure_user(query.from_user.id, query.from_user.username)
+        log_handler(
+            "reminder_callback",
+            query.message.chat.id if query.message else None,
+            debug=settings.debug,
+            text=query.data,
+        )
+        if query.data.startswith("remind_edit:"):
+            from uuid import UUID
+
+            rid = UUID(query.data.removeprefix("remind_edit:"))
+            await query.answer()
+            if query.message is not None:
+                rows = [
+                    [
+                        InlineKeyboardButton(
+                            text=label,
+                            callback_data=f"reminder_repeat_set:{rid}:{data.split(':')[-1]}",
+                        )
+                    ]
+                    for label, data in REPEAT_BUTTONS
+                ]
+                markup = InlineKeyboardMarkup(inline_keyboard=rows)
+                await query.message.answer(COPY["reminder_ask_repeat"], reply_markup=markup)
+            return
+        reply = await reminders.handle_callback(user.id, query.data)
+        await query.answer()
+        if reply is not None and query.message is not None:
+            await query.message.answer(reply.text, reply_markup=reply.markup)
+
     @router.callback_query(F.data.startswith("profile_"))
     async def on_profile_button(query: CallbackQuery) -> None:
         if profile is None or query.from_user is None or query.data is None:
@@ -163,6 +225,14 @@ def build_router(
                 and not await profile.is_in_dialog(user.id)
             ):
                 await deliver_recommendations(query.message, user.id, recommend)
+            if (
+                reminders is not None
+                and query.data is not None
+                and query.data.startswith("profile_mode:")
+            ):
+                tax_follow = await reminders.continue_tax_offer(user.id)
+                if tax_follow is not None and query.message is not None:
+                    await query.message.answer(tax_follow.text, reply_markup=tax_follow.markup)
 
     @router.callback_query()
     async def on_button(query: CallbackQuery) -> None:
@@ -178,9 +248,15 @@ def build_router(
         ):
             user = await profile.ensure_user(query.from_user.id, query.from_user.username)
             await deliver_recommendations(query.message, user.id, recommend, prefer_route=True)
-        if query.data == "remind" and query.message is not None:
-            await query.message.answer(
-                "Напишите, о чём напомнить — например: «Напомни в пятницу продолжить курс»."
-            )
+        if (
+            query.data == "remind"
+            and reminders is not None
+            and profile is not None
+            and query.from_user is not None
+            and query.message is not None
+        ):
+            user = await profile.ensure_user(query.from_user.id, query.from_user.username)
+            reply = await reminders.start_custom_flow(user.id)
+            await query.message.answer(reply.text, reply_markup=reply.markup)
 
     return router
