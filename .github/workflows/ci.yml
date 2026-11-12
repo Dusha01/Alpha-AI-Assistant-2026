@@ -32,7 +32,11 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - name: Install dev dependencies
-        run: python -m pip install -r requirements-dev.txt
+        run: |
+          python -m pip install --upgrade pip
+          # sentence-transformers тянет CUDA torch с PyPI; на раннере не хватает диска.
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements-dev.txt
       - name: Ruff
         run: |
           ruff check src tests
