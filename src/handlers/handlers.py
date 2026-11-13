@@ -385,6 +385,7 @@ def build_router(
             await profile.reset_dialog(user.id)
         if query.data == "ask" and query.message is not None:
             await query.message.answer(COPY["smalltalk"])
+            return
         if (
             query.data == "materials"
             and recommend is not None
