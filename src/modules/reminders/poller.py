@@ -53,6 +53,7 @@ async def _tick(
         except Exception:
             logger.exception("reminder_send_failed user_id={}", row.user_id)
             continue
+        logger.info("reminder_sent user_id={} id={}", row.user_id, row.id)
         async with session_factory() as session:
             repo = ReminderRepository(session)
             current = await repo.get_by_id(row.id)
