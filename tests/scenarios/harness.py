@@ -9,7 +9,13 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
-from aiogram.methods import AnswerCallbackQuery, SendMessage, TelegramMethod
+from aiogram.methods import (
+    AnswerCallbackQuery,
+    DeleteMessage,
+    SendChatAction,
+    SendMessage,
+    TelegramMethod,
+)
 from aiogram.methods.base import TelegramType
 from aiogram.types import CallbackQuery, Chat, Message, Sticker, Update, User
 from sqlalchemy import select
@@ -53,6 +59,7 @@ class ScriptedKnowledge:
         question: str,
         *,
         search_query: str | None = None,
+        profile: object | None = None,
     ) -> BotReply:
         self.calls.append((question, search_query))
         if question in self.fail:
@@ -84,6 +91,7 @@ class RecordingSession(BaseSession):
         super().__init__()
         self.fail_sends = 0
         self._events: list[tuple[str, OutgoingMessage | str | None]] = []
+        self._ids: list[int | None] = []
         self._cursor = 0
         self._message_id = 1000
 
@@ -111,8 +119,9 @@ class RecordingSession(BaseSession):
                     for button in row:
                         buttons.append((button.text, button.callback_data or ""))
             outgoing = OutgoingMessage(method.text, tuple(buttons))
-            self._events.append(("message", outgoing))
             self._message_id += 1
+            self._events.append(("message", outgoing))
+            self._ids.append(self._message_id)
             chat_id = int(method.chat_id) if isinstance(method.chat_id, str) else method.chat_id
             return Message(
                 message_id=self._message_id,
@@ -120,10 +129,26 @@ class RecordingSession(BaseSession):
                 chat=Chat(id=chat_id, type="private"),
                 text=method.text,
             ).as_(bot)
+        if isinstance(method, SendChatAction):
+            return True
+        if isinstance(method, DeleteMessage):
+            self._drop(method.message_id)
+            return True
         if isinstance(method, AnswerCallbackQuery):
             self._events.append(("alert", method.text))
+            self._ids.append(None)
             return True
         raise AssertionError(f"unexpected method {type(method).__name__}")
+
+    def _drop(self, message_id: int) -> None:
+        try:
+            index = self._ids.index(message_id)
+        except ValueError:
+            return
+        del self._events[index]
+        del self._ids[index]
+        if index < self._cursor:
+            self._cursor -= 1
 
     def drain(self) -> Turn:
         fresh = self._events[self._cursor :]

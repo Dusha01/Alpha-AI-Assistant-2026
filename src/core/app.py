@@ -36,10 +36,11 @@ async def poll(settings: Settings) -> None:
     dispatcher = Dispatcher()
     engine = create_engine(settings.database_url_resolved)
     session_factory = create_session_factory(engine)
+    embedder = LazySentenceTransformerEmbedder(settings.embedding_model)
     knowledge = KnowledgeService(
         settings=settings,
         session_factory=session_factory,
-        embedder=LazySentenceTransformerEmbedder(settings.embedding_model),
+        embedder=embedder,
         llm=OpenAICompatibleLlm(
             base_url=settings.llm_base_url,
             api_key=settings.llm_api_key,
@@ -53,6 +54,9 @@ async def poll(settings: Settings) -> None:
     reminders = ReminderService(settings=settings, session_factory=session_factory)
     dispatcher.include_router(build_router(settings, knowledge, profiles, recommend, reminders))
     dispatcher.errors.register(on_handler_error)
+    logger.info("Прогрев модели эмбеддингов {}", settings.embedding_model)
+    await asyncio.to_thread(embedder.warmup)
+    logger.info("Модель эмбеддингов готова")
     poller_task = asyncio.create_task(
         run_reminder_poller(
             bot,

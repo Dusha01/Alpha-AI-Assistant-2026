@@ -181,11 +181,14 @@ async def test_profile_and_reminders_commands_leave_the_questionnaire(dialog: Di
 
     await begin_profile(dialog)
     reminders = await dialog.say("/reminders")
-    await dialog.say("Кофейня, полгода")
 
     assert reminders.text == COPY["reminders_empty"]
-    assert await dialog.profile_row() is None or (await dialog.profile_row()).sphere is None
-    assert dialog.knowledge.calls[-1][0] == "Кофейня, полгода"
+    assert await dialog.dialog_state() == "idle"
+    question = await dialog.say("Как платить налог?")
+    assert dialog.knowledge.calls[-1][0] == "Как платить налог?"
+    assert question.text == COPY["not_found"]
+    profile_row = await dialog.profile_row()
+    assert profile_row is None or profile_row.sphere is None
 
 
 async def test_remind_phrase_inside_profile_does_not_start_reminder(dialog: Dialog) -> None:

@@ -128,7 +128,7 @@ async def test_odd_time_phrases(dialog: Dialog) -> None:
     yesterday = await dialog.say("вчера")
     bad_clock = await dialog.say("в 25:00")
     zero = await dialog.say("через 0 минут")
-    assert yesterday.text == COPY["reminder_bad_time"]
+    assert yesterday.text == COPY["reminder_past"]
     assert bad_clock.text == COPY["reminder_bad_time"]
     assert zero.text == COPY["reminder_ask_repeat"]
 

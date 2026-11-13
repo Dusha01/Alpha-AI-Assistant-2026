@@ -12,6 +12,7 @@ from src.data.repositories.dialog_states import DialogStateRepository
 from src.data.repositories.profiles import ProfileRepository
 from src.data.repositories.users import UserRepository
 from src.handlers.text import COPY
+from src.modules.knowledge.clarify_rules import ProfileSnapshot
 from src.modules.profile import states
 from src.modules.profile.dialog_memory import payload_after_reset, payload_with_follow_up
 from src.modules.profile.keyboards import (
@@ -97,6 +98,13 @@ class ProfileService:
             )
             await session.commit()
 
+    async def knowledge_snapshot(self, user_id: uuid.UUID) -> ProfileSnapshot:
+        async with self.session_factory() as session:
+            profile = await ProfileRepository(session).get_by_user_id(user_id)
+        if profile is None:
+            return ProfileSnapshot()
+        return ProfileSnapshot(sphere=profile.sphere, stage=profile.stage, mode=profile.mode)
+
     async def follow_up_context(self, user_id: uuid.UUID) -> tuple[str | None, str | None]:
         async with self.session_factory() as session:
             row = await DialogStateRepository(session).get_by_user_id(user_id)
@@ -113,6 +121,29 @@ class ProfileService:
         async with self.session_factory() as session:
             dialog = await DialogStateRepository(session).get_by_user_id(user_id)
             return dialog is not None and dialog.state in states.ACTIVE_STATES
+
+    async def accept_business_line(self, user_id: uuid.UUID, text: str) -> ProfileReply:
+        async with self.session_factory() as session:
+            reply = await self._handle_business_text(
+                ProfileRepository(session),
+                DialogStateRepository(session),
+                user_id,
+                text,
+            )
+            await session.commit()
+            return reply
+
+    async def remember_mode(self, user_id: uuid.UUID, mode: TaxMode) -> ProfileReply:
+        async with self.session_factory() as session:
+            reply = await self._save_mode(
+                ProfileRepository(session),
+                DialogStateRepository(session),
+                user_id,
+                mode,
+                mode == TaxMode.UNKNOWN,
+            )
+            await session.commit()
+            return reply
 
     async def show_profile(self, user_id: uuid.UUID) -> ProfileReply:
         async with self.session_factory() as session:

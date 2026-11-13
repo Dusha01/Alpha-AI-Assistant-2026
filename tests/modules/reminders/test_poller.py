@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.data.models.enums import ReminderRepeat
@@ -19,7 +20,7 @@ async def test_poller_sends_once_and_advances(
     db_session: AsyncSession,
 ) -> None:
     user = await UserRepository(db_session).create(telegram_id=400000010)
-    await ReminderRepository(db_session).create(
+    reminder = await ReminderRepository(db_session).create(
         user.id,
         text="через минуту",
         repeat=ReminderRepeat.ONCE,
@@ -30,8 +31,15 @@ async def test_poller_sends_once_and_advances(
     bot = AsyncMock()
     settings = __import__("src.core.settings", fromlist=["Settings"]).Settings()
     service = ReminderService(settings=settings, session_factory=profile_session_factory)  # type: ignore[arg-type]
-    await _tick(bot, profile_session_factory, service)  # type: ignore[arg-type]
+    logged: list[str] = []
+    sink = logger.add(lambda message: logged.append(message.record["message"]))
+    try:
+        await _tick(bot, profile_session_factory, service)  # type: ignore[arg-type]
+    finally:
+        logger.remove(sink)
 
     bot.send_message.assert_awaited_once()
+    sent = [line for line in logged if line.startswith("reminder_sent ")]
+    assert sent == [f"reminder_sent user_id={user.id} id={reminder.id}"]
     due = await ReminderRepository(db_session).claim_due(datetime.now(UTC))
     assert due == []
