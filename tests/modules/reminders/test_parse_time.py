@@ -37,6 +37,12 @@ def test_past_time() -> None:
     assert past.kind == "past"
 
 
+def test_yesterday_morning_is_past() -> None:
+    past = parse_when("вчера в 9 утра", _now(), tz_name="Asia/Vladivostok")
+    assert isinstance(past, TimeParseError)
+    assert past.kind == "past"
+
+
 def test_garbage() -> None:
     bad = parse_when("когда-нибудь потом", _now(), tz_name="Asia/Vladivostok")
     assert isinstance(bad, TimeParseError)

@@ -312,3 +312,10 @@ curl -s http://127.0.0.1:8000/health
 | `bot` | в `docker-compose.dev.yml` закомментирован, бот запускается из venv | gunicorn + aiogram в контейнере |
 
 Схема `public.*` приходит из дампа платформы. Схемы `app.*` и таблица `content.chunks` создаются миграциями; строки чанков пишет загрузка знаний.
+
+
+## Tests
+```python
+pytest -q tests/scenarios -m integration
+pytest -q tests/questions -m questions
+```

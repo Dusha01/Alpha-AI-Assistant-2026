@@ -39,9 +39,17 @@ def test_handler_texts_match_spec() -> None:
         "Чтобы ответить точнее, расскажите чуть подробнее: о какой ситуации речь?"
     )
     assert COPY["not_found"] == (
-        "В материалах «Альфа-Курса» нет ответа на этот вопрос. Могу помочь "
-        "с вопросами о запуске бизнеса, учёте, налогах, маркетинге и продажах."
+        "В материалах «Альфа-Курса» нет ответа на этот вопрос, поэтому не буду гадать. "
+        "Напишите, какую задачу по запуску, учёту, налогам или продажам разобрать."
     )
+    assert "консульства" in COPY["not_found_visa"]
+    assert "курс" in COPY["not_found_fx"]
+    assert "рецепт" in COPY["not_found_recipe"].lower() or "Рецепта" in COPY["not_found_recipe"]
+    assert "код" in COPY["not_found_code"]
+    assert "VIN" in COPY["not_found_vin"]
+    assert "кофемашин" in COPY["not_found_device"]
+    assert "банк" in COPY["not_found_banks"]
+    assert "инструкц" in COPY["not_found_prompt"]
     assert COPY["not_found_related"] == (
         "Точного ответа в материалах нет, но вот что может быть полезно: "
         "«{material_name}» — {benefit}. {url}"

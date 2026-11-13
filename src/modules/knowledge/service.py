@@ -9,13 +9,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from src.core.settings import Settings
 from src.data.repositories.chunks import ChunkRepository
 from src.handlers.text import COPY
+from src.modules.knowledge.clarify_rules import ProfileSnapshot, clarify_reply
 from src.modules.knowledge.decision import SearchOutcome, decide_outcome
 from src.modules.knowledge.embedder import Embedder
-from src.modules.knowledge.llm import LlmClient, LlmNotConfiguredError, LlmRequestError
+from src.modules.knowledge.llm import LlmClient
+from src.modules.knowledge.outside import outside_reply
 from src.modules.knowledge.prompt import build_llm_messages
+from src.modules.knowledge.relevance import collapse_by_url, expand_query, prefer_lexical_hit
 from src.modules.knowledge.text import benefit_one_liner
 from src.modules.knowledge.types import SearchHit
 from src.modules.recommend.utm import slug_from_url, with_utm
+
+_CANDIDATE_LIMIT = 80
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,17 +44,28 @@ class KnowledgeService:
         self.embedder = embedder
         self.llm = llm
 
-    async def answer_question(self, question: str, *, search_query: str | None = None) -> BotReply:
+    async def answer_question(
+        self,
+        question: str,
+        *,
+        search_query: str | None = None,
+        profile: ProfileSnapshot | None = None,
+    ) -> BotReply:
+        early = outside_reply(question) or clarify_reply(question, profile)
+        if early is not None:
+            return BotReply(early)
         hits = await self.search(search_query or question)
-        return await self.answer_from_hits(question, hits)
+        return await self.answer_from_hits(question, hits, profile=profile)
 
     async def search(self, question: str) -> list[SearchHit]:
-        vector = await asyncio.to_thread(self.embedder.embed_query, question)
+        vector = await asyncio.to_thread(self.embedder.embed_query, expand_query(question))
         async with self.session_factory() as session:
             hits = await ChunkRepository(session).search_similar(
                 vector,
-                limit=self.settings.rag_top_k,
+                limit=max(self.settings.rag_top_k, _CANDIDATE_LIMIT),
             )
+        hits = prefer_lexical_hit(collapse_by_url(hits, question), question)
+        hits = hits[: self.settings.rag_top_k]
         if hits and self.settings.debug:
             logger.debug(
                 "rag_search question={} top_score={:.4f} title={}",
@@ -59,7 +75,18 @@ class KnowledgeService:
             )
         return hits
 
-    async def answer_from_hits(self, question: str, hits: list[SearchHit]) -> BotReply:
+    async def answer_from_hits(
+        self,
+        question: str,
+        hits: list[SearchHit],
+        *,
+        profile: ProfileSnapshot | None = None,
+    ) -> BotReply:
+        early = outside_reply(question) or clarify_reply(question, profile)
+        if early is not None:
+            logger.info("rag_outcome kind=early question={}", question[:120])
+            return BotReply(early)
+        hits = prefer_lexical_hit(hits, question)
         outcome = decide_outcome(
             hits,
             question=question,
@@ -99,20 +126,20 @@ class KnowledgeService:
     async def _answer_with_llm(self, question: str, hits: tuple[SearchHit, ...]) -> BotReply:
         if not self.settings.llm_api_key.strip():
             return BotReply(COPY["error_llm"])
-        messages = build_llm_messages(question, hits[:3])
         try:
+            messages = build_llm_messages(question, hits[:3])
             llm_text = await self.llm.complete(messages)
-        except (LlmNotConfiguredError, LlmRequestError) as exc:
+            primary = hits[0]
+            url = _public_url(primary.url)
+            if _should_append_source(llm_text, primary.title, url):
+                source = COPY["answer_source"].format(material_name=primary.title, url=url)
+                text = f"{llm_text}\n\n{source}"
+            else:
+                text = llm_text
+            return BotReply(text, feedback=True, material_title=primary.title)
+        except Exception as exc:
             logger.warning("LLM недоступен: {}", exc)
             return BotReply(COPY["error_llm"])
-        primary = hits[0]
-        url = _public_url(primary.url)
-        if _should_append_source(llm_text, primary.title, url):
-            source = COPY["answer_source"].format(material_name=primary.title, url=url)
-            text = f"{llm_text}\n\n{source}"
-        else:
-            text = llm_text
-        return BotReply(text, feedback=True, material_title=primary.title)
 
 
 def _public_url(url: str | None) -> str:
