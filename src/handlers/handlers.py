@@ -1,9 +1,12 @@
 # Слой контракта. Хендлеры делегируют разбор входящего сообщения и не содержат правил.
 
+import asyncio
+import contextlib
 import re
 import uuid
 
 from aiogram import F, Router
+from aiogram.enums import ChatAction
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
@@ -21,6 +24,7 @@ from src.modules.reminders.keyboards import REPEAT_BUTTONS
 from src.modules.reminders.service import ReminderService
 
 _BUTTON_ACTIONS = ("ask", "materials", "remind")
+_TYPING_REFRESH_SECONDS = 4.0
 _READING_INTENT = re.compile(
     r"(?:что(?:\s+мне)?\s+(?:почитать|посмотреть)|с чего начать)",
     re.IGNORECASE,
@@ -74,6 +78,59 @@ def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+class _Thinking:
+    def __init__(
+        self,
+        placeholder: Message,
+        stop: asyncio.Event,
+        task: asyncio.Task[None],
+    ) -> None:
+        self.placeholder = placeholder
+        self.stop = stop
+        self.task = task
+        self.closed = False
+
+    async def finish(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        self.stop.set()
+        self.task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self.task
+        try:
+            await self.placeholder.delete()
+        except Exception as exc:
+            logger.warning("Не удалось убрать сообщение «Думаю»: {}", exc)
+
+
+async def _typing_until(message: Message, stop: asyncio.Event) -> None:
+    while True:
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=_TYPING_REFRESH_SECONDS)
+            return
+        except TimeoutError:
+            pass
+        try:
+            await message.bot.send_chat_action(message.chat.id, action=ChatAction.TYPING)
+        except Exception:
+            return
+
+
+async def _begin_thinking(message: Message) -> _Thinking | None:
+    if message.bot is None:
+        return None
+    try:
+        await message.bot.send_chat_action(message.chat.id, action=ChatAction.TYPING)
+        placeholder = await message.answer(COPY["thinking"])
+    except Exception as exc:
+        logger.warning("Не удалось показать, что бот печатает: {}", exc)
+        return None
+    stop = asyncio.Event()
+    task = asyncio.create_task(_typing_until(message, stop))
+    return _Thinking(placeholder, stop, task)
+
+
 async def deliver_knowledge(
     message: Message,
     knowledge: KnowledgeService,
@@ -81,6 +138,7 @@ async def deliver_knowledge(
     recommend: RecommendService | None,
     user_id: uuid.UUID | None,
 ) -> None:
+    thinking = await _begin_thinking(message)
     sent = False
     try:
         previous_question = None
@@ -99,6 +157,8 @@ async def deliver_knowledge(
             search_query=search_query,
             profile=snapshot,
         )
+        if thinking is not None:
+            await thinking.finish()
         for part in split_telegram_text(reply.text):
             await message.answer(part)
             sent = True
@@ -118,6 +178,8 @@ async def deliver_knowledge(
             await message.answer(follow.text, reply_markup=follow.markup)
     except Exception as exc:
         logger.exception("Не удалось ответить на вопрос")
+        if thinking is not None:
+            await thinking.finish()
         if sent:
             return
         key = (
@@ -126,6 +188,9 @@ async def deliver_knowledge(
             else "error_general"
         )
         await message.answer(COPY[key])
+    finally:
+        if thinking is not None:
+            await thinking.finish()
 
 
 def build_router(

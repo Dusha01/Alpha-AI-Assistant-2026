@@ -6,7 +6,13 @@ from typing import Any
 import pytest
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
-from aiogram.methods import AnswerCallbackQuery, SendMessage, TelegramMethod
+from aiogram.methods import (
+    AnswerCallbackQuery,
+    DeleteMessage,
+    SendChatAction,
+    SendMessage,
+    TelegramMethod,
+)
 from aiogram.methods.base import TelegramType
 from aiogram.types import Chat, Message, Update, User
 from tests.modules.knowledge.test_service import _service, _settings
@@ -25,8 +31,13 @@ _TOKEN = "123456789:AAH-scenario-test"
 class _RecordingSession(BaseSession):
     def __init__(self) -> None:
         super().__init__()
-        self.texts: list[str] = []
+        self._sent: list[tuple[int, str]] = []
+        self.actions: list[str] = []
         self._message_id = 1
+
+    @property
+    def texts(self) -> list[str]:
+        return [text for _, text in self._sent]
 
     async def close(self) -> None:
         return None
@@ -42,8 +53,8 @@ class _RecordingSession(BaseSession):
         timeout: int | None = None,
     ) -> TelegramType:
         if isinstance(method, SendMessage):
-            self.texts.append(method.text)
             self._message_id += 1
+            self._sent.append((self._message_id, method.text))
             chat_id = int(method.chat_id) if isinstance(method.chat_id, str) else method.chat_id
             return Message(
                 message_id=self._message_id,
@@ -51,6 +62,12 @@ class _RecordingSession(BaseSession):
                 chat=Chat(id=chat_id, type="private"),
                 text=method.text,
             ).as_(bot)
+        if isinstance(method, SendChatAction):
+            self.actions.append(method.action)
+            return True
+        if isinstance(method, DeleteMessage):
+            self._sent = [item for item in self._sent if item[0] != method.message_id]
+            return True
         if isinstance(method, AnswerCallbackQuery):
             return True
         raise AssertionError(type(method).__name__)
@@ -76,7 +93,7 @@ def _service_with(llm: object) -> KnowledgeService:
     return service
 
 
-async def _ask(service: KnowledgeService) -> list[str]:
+async def _ask(service: KnowledgeService) -> _RecordingSession:
     session = _RecordingSession()
     bot = Bot(token=_TOKEN, session=session)
     dispatcher = Dispatcher()
@@ -93,7 +110,7 @@ async def _ask(service: KnowledgeService) -> list[str]:
     update.as_(bot)
     message.as_(bot)
     await dispatcher.feed_update(bot, update)
-    return session.texts
+    return session
 
 
 @pytest.mark.asyncio
@@ -106,5 +123,7 @@ async def test_model_failure_sends_only_the_hitch(error: Exception) -> None:
         async def complete(self, messages: list[dict[str, str]]) -> str:
             raise error
 
-    texts = await _ask(_service_with(Boom()))
-    assert texts == [COPY["error_llm"]]
+    session = await _ask(_service_with(Boom()))
+    assert session.texts == [COPY["error_llm"]]
+    assert session.actions == ["typing"]
+    assert COPY["thinking"] not in session.texts

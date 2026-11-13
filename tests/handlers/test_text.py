@@ -24,6 +24,7 @@ def test_handler_texts_match_spec() -> None:
     assert COPY["smalltalk"] == (
         "Рад помочь! Спросите о любом вопросе бизнеса: налоги, учёт, маркетинг, продажи."
     )
+    assert COPY["thinking"] == "Думаю…"
     assert COPY["error_general"] == (
         "Что-то пошло не так. Попробуйте ещё раз или отправьте /start."
     )
