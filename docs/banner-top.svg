@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" role="img">
+  <title>Альфа-Курс</title>
+  <rect width="1200" height="300" fill="#F6F4F1"/>
+  <rect x="72" y="78" width="36" height="3" fill="#E10600"/>
+  <text x="72" y="128" fill="#8C877F" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" letter-spacing="4">TELEGRAM</text>
+  <text x="72" y="196" fill="#141311" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="68">Альфа-Курс</text>
+  <text x="72" y="238" fill="#5E5A54" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="18">Ответы по материалам, подборки и напоминания</text>
+</svg>

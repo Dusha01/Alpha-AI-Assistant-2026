@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 84" role="img">
+  <title>Стек: Python, aiogram, PostgreSQL, pgvector, SQLAlchemy, Alembic, Docker</title>
+  <rect width="1200" height="84" fill="#F6F4F1"/>
+  <rect x="105.0" y="18" width="150" height="40" rx="20" fill="#FFFFFF" stroke="#E4DFD8"/>
+  <text x="180.0" y="44" text-anchor="middle" fill="#141311" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="15">Python 3.12</text>
+  <rect x="267.0" y="18" width="116" height="40" rx="20" fill="#FFFFFF" stroke="#E4DFD8"/>
+  <text x="325.0" y="44" text-anchor="middle" fill="#141311" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="15">aiogram</text>
+  <rect x="395.0" y="18" width="168" height="40" rx="20" fill="#FFFFFF" stroke="#E4DFD8"/>
+  <text x="479.0" y="44" text-anchor="middle" fill="#141311" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="15">PostgreSQL</text>
+  <rect x="575.0" y="18" width="122" height="40" rx="20" fill="#FFFFFF" stroke="#E4DFD8"/>
+  <text x="636.0" y="44" text-anchor="middle" fill="#141311" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="15">pgvector</text>
+  <rect x="709.0" y="18" width="146" height="40" rx="20" fill="#FFFFFF" stroke="#E4DFD8"/>
+  <text x="782.0" y="44" text-anchor="middle" fill="#141311" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="15">SQLAlchemy</text>
+  <rect x="867.0" y="18" width="112" height="40" rx="20" fill="#FFFFFF" stroke="#E4DFD8"/>
+  <text x="923.0" y="44" text-anchor="middle" fill="#141311" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="15">Alembic</text>
+  <rect x="991.0" y="18" width="104" height="40" rx="20" fill="#FFFFFF" stroke="#E4DFD8"/>
+  <text x="1043.0" y="44" text-anchor="middle" fill="#141311" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="15">Docker</text>
+</svg>

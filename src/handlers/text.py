@@ -1,3 +1,20 @@
+def interesting_fact_message(fact: str) -> str:
+    return COPY["interesting_fact"].replace("{fact}", fact, 1)
+
+
+def found_articles_status(count: int) -> str:
+    """Статус «нашёл N статей» с правильным падежом."""
+    remainder = count % 100
+    last = count % 10
+    if last == 1 and remainder != 11:
+        word = "статью"
+    elif last in {2, 3, 4} and remainder not in {12, 13, 14}:
+        word = "статьи"
+    else:
+        word = "статей"
+    return f"📚 Нашёл {count} {word}, формулирую…"
+
+
 def _lead(mark: str, text: str) -> str:
     return f"{mark} {text}"
 
@@ -29,7 +46,9 @@ COPY: dict[str, str] = {
     "smalltalk": (
         "Рад помочь! Спросите о любом вопросе бизнеса: налоги, учёт, маркетинг, продажи."
     ),
-    "thinking": "Думаю…",
+    "thinking_search": "🔎 Ищу в материалах…",
+    "interesting_fact": "💡 Кстати, у меня есть интересный факт: {fact}",
+    "thinking_slow": "Ещё пара секунд",
     "error_general": "Что-то пошло не так. Попробуйте ещё раз или отправьте /start.",
     "too_long": (
         "Сообщение получилось длинным. Сформулируйте, пожалуйста, "

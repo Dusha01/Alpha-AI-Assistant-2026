@@ -147,7 +147,7 @@ async def test_unexpected_llm_error_returns_hitch() -> None:
 
     service = _service(_settings(), Boom())  # type: ignore[arg-type]
 
-    async def search(question: str) -> list[SearchHit]:
+    async def retrieve(question: str) -> tuple[list[SearchHit], str | None]:
         return [
             SearchHit(
                 title="Учёт на УСН",
@@ -156,8 +156,73 @@ async def test_unexpected_llm_error_returns_hitch() -> None:
                 is_paid=False,
                 score=0.9,
             )
-        ]
+        ], None
 
-    service.search = search  # type: ignore[method-assign]
+    service.retrieve = retrieve  # type: ignore[method-assign]
     reply = await service.answer_question("Как вести учёт доходов на УСН?")
     assert reply.text == COPY["error_llm"]
+
+
+@pytest.mark.asyncio
+async def test_fact_is_announced_before_the_answer_model() -> None:
+    order: list[str] = []
+
+    class OrderedLlm:
+        async def complete(self, messages: list[dict[str, str]]) -> str:
+            order.append("llm")
+            return "Короткий ответ из модели."
+
+    service = _service(_settings(), OrderedLlm())  # type: ignore[arg-type]
+
+    async def on_sources(count: int) -> None:
+        order.append(f"sources:{count}")
+
+    async def on_fact(text: str) -> None:
+        order.append(text)
+
+    await service.answer_from_hits(
+        "Как вести учёт доходов на УСН?",
+        [
+            SearchHit(
+                title="Учёт на УСН",
+                url="https://example/usn",
+                body="Как вести учёт доходов на УСН",
+                is_paid=False,
+                score=0.9,
+            )
+        ],
+        on_sources=on_sources,
+        on_fact=on_fact,
+        fact="Взносы уменьшают налог на УСН.",
+    )
+    assert order == [
+        "sources:1",
+        "💡 Кстати, у меня есть интересный факт: Взносы уменьшают налог на УСН.",
+        "llm",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_not_found_does_not_announce_a_fact() -> None:
+    announced: list[str] = []
+
+    async def on_fact(text: str) -> None:
+        announced.append(text)
+
+    service = _service(_settings(), StubLlmClient())
+    reply = await service.answer_from_hits(
+        "Как вести учёт доходов на УСН?",
+        [
+            SearchHit(
+                title="Чужой материал",
+                url="https://example/other",
+                body="совсем другая тема",
+                is_paid=False,
+                score=0.1,
+            )
+        ],
+        on_fact=on_fact,
+        fact="Взносы уменьшают налог на УСН.",
+    )
+    assert reply.text == COPY["not_found"]
+    assert announced == []

@@ -5,6 +5,12 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
+class FactHit:
+    body: str
+    score: float
+
+
+@dataclass(frozen=True, slots=True)
 class SearchHit:
     title: str
     url: str | None

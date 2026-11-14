@@ -13,7 +13,7 @@ from loguru import logger
 from src.core.settings import Settings
 from src.handlers.incoming import RESET_DIALOG_KEYS, reply_key
 from src.handlers.telegram_text import split_telegram_text
-from src.handlers.text import COPY, FEEDBACK_BUTTONS, START_BUTTONS
+from src.handlers.text import COPY, FEEDBACK_BUTTONS, START_BUTTONS, found_articles_status
 from src.modules.knowledge.follow_up import queries_for_turn
 from src.modules.knowledge.llm import LlmNotConfiguredError, LlmRequestError
 from src.modules.knowledge.service import BotReply, KnowledgeService
@@ -25,6 +25,7 @@ from src.modules.reminders.service import ReminderService
 
 _BUTTON_ACTIONS = ("ask", "materials", "remind")
 _TYPING_REFRESH_SECONDS = 4.0
+_SLOW_AFTER_SECONDS = 15.0
 _READING_INTENT = re.compile(
     r"(?:что(?:\s+мне)?\s+(?:почитать|посмотреть)|с чего начать)",
     re.IGNORECASE,
@@ -79,42 +80,106 @@ def start_keyboard() -> InlineKeyboardMarkup:
 
 
 class _Thinking:
-    def __init__(
-        self,
-        placeholder: Message,
-        stop: asyncio.Event,
-        task: asyncio.Task[None],
-    ) -> None:
+    def __init__(self, placeholder: Message, stop: asyncio.Event) -> None:
         self.placeholder = placeholder
         self.stop = stop
-        self.task = task
+        self.task: asyncio.Task[None] | None = None
         self.closed = False
+        self._lock = asyncio.Lock()
+        self._stage_started = asyncio.get_running_loop().time()
+        self._slow_shown = False
+
+    async def show(self, text: str) -> None:
+        """Новая стадия. Срок «ещё пара секунд» считается заново."""
+        async with self._lock:
+            if self.closed:
+                return
+            self._stage_started = asyncio.get_running_loop().time()
+            self._slow_shown = False
+            try:
+                await self.placeholder.edit_text(text)
+            except Exception as exc:
+                logger.warning("Не удалось обновить статус: {}", exc)
+
+    def seconds_until_slow(self, now: float) -> float | None:
+        if self.closed or self._slow_shown:
+            return None
+        return max(0.0, self._stage_started + _SLOW_AFTER_SECONDS - now)
+
+    async def maybe_slow(self, now: float) -> None:
+        async with self._lock:
+            if self.closed or self._slow_shown:
+                return
+            if now - self._stage_started < _SLOW_AFTER_SECONDS:
+                return
+            self._slow_shown = True
+            try:
+                await self.placeholder.edit_text(COPY["thinking_slow"])
+            except Exception as exc:
+                logger.warning("Не удалось показать, что ответ задерживается: {}", exc)
 
     async def finish(self) -> None:
-        if self.closed:
-            return
-        self.closed = True
         self.stop.set()
-        self.task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await self.task
-        try:
+        async with self._lock:
+            if self.closed:
+                return
+            self.closed = True
+        if self.task is not None and not self.task.done():
+            self.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.task
+
+    async def replace(self, text: str) -> bool:
+        """Подменяет статус ответом. Если правка не вышла, сообщение удаляется."""
+        self.stop.set()
+        async with self._lock:
+            self.closed = True
+            try:
+                await self.placeholder.edit_text(text)
+                edited = True
+            except Exception as exc:
+                logger.warning("Не удалось заменить статус ответом: {}", exc)
+                edited = False
+        if self.task is not None and not self.task.done():
+            self.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.task
+        if edited:
+            return True
+        with contextlib.suppress(Exception):
             await self.placeholder.delete()
-        except Exception as exc:
-            logger.warning("Не удалось убрать сообщение «Думаю»: {}", exc)
+        return False
 
 
-async def _typing_until(message: Message, stop: asyncio.Event) -> None:
-    while True:
-        try:
-            await asyncio.wait_for(stop.wait(), timeout=_TYPING_REFRESH_SECONDS)
+async def _watch_status(message: Message, thinking: _Thinking, stop: asyncio.Event) -> None:
+    bot = message.bot
+    if bot is None:
+        return
+    loop = asyncio.get_running_loop()
+    next_typing = loop.time() + _TYPING_REFRESH_SECONDS
+    while not stop.is_set():
+        now = loop.time()
+        deadline = next_typing
+        until_slow = thinking.seconds_until_slow(now)
+        if until_slow is not None:
+            deadline = min(deadline, now + until_slow)
+        timeout = deadline - now
+        if timeout > 0:
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=timeout)
+                return
+            except TimeoutError:
+                pass
+        if stop.is_set():
             return
-        except TimeoutError:
-            pass
-        try:
-            await message.bot.send_chat_action(message.chat.id, action=ChatAction.TYPING)
-        except Exception:
-            return
+        now = loop.time()
+        await thinking.maybe_slow(now)
+        if now >= next_typing:
+            next_typing = now + _TYPING_REFRESH_SECONDS
+            try:
+                await bot.send_chat_action(message.chat.id, action=ChatAction.TYPING)
+            except Exception:
+                return
 
 
 async def _begin_thinking(message: Message) -> _Thinking | None:
@@ -122,13 +187,14 @@ async def _begin_thinking(message: Message) -> _Thinking | None:
         return None
     try:
         await message.bot.send_chat_action(message.chat.id, action=ChatAction.TYPING)
-        placeholder = await message.answer(COPY["thinking"])
+        placeholder = await message.answer(COPY["thinking_search"])
     except Exception as exc:
         logger.warning("Не удалось показать, что бот печатает: {}", exc)
         return None
     stop = asyncio.Event()
-    task = asyncio.create_task(_typing_until(message, stop))
-    return _Thinking(placeholder, stop, task)
+    thinking = _Thinking(placeholder, stop)
+    thinking.task = asyncio.create_task(_watch_status(message, thinking, stop))
+    return thinking
 
 
 async def deliver_knowledge(
@@ -152,14 +218,32 @@ async def deliver_knowledge(
             previous_question=previous_question,
             previous_material=previous_material,
         )
+
+        async def _note_sources(count: int) -> None:
+            if thinking is not None and count > 0:
+                await thinking.show(found_articles_status(count))
+
+        async def _note_fact(text: str) -> None:
+            try:
+                await message.answer(text)
+            except Exception as exc:
+                logger.warning("Не удалось отправить факт: {}", exc)
+
         reply: BotReply = await knowledge.answer_question(
             question,
             search_query=search_query,
             profile=snapshot,
+            on_sources=_note_sources,
+            on_fact=_note_fact,
         )
-        if thinking is not None:
-            await thinking.finish()
-        for part in split_telegram_text(reply.text):
+        parts = split_telegram_text(reply.text)
+        if thinking is not None and parts:
+            if await thinking.replace(parts[0]):
+                parts = parts[1:]
+                sent = True
+            else:
+                await thinking.finish()
+        for part in parts:
             await message.answer(part)
             sent = True
         if reply.material_title and profile is not None and user_id is not None:
@@ -178,16 +262,21 @@ async def deliver_knowledge(
             await message.answer(follow.text, reply_markup=follow.markup)
     except Exception as exc:
         logger.exception("Не удалось ответить на вопрос")
-        if thinking is not None:
-            await thinking.finish()
         if sent:
+            if thinking is not None:
+                await thinking.finish()
             return
         key = (
             "error_llm"
             if isinstance(exc, (LlmRequestError, LlmNotConfiguredError))
             else "error_general"
         )
-        await message.answer(COPY[key])
+        text = COPY[key]
+        if thinking is not None and await thinking.replace(text):
+            return
+        if thinking is not None:
+            await thinking.finish()
+        await message.answer(text)
     finally:
         if thinking is not None:
             await thinking.finish()

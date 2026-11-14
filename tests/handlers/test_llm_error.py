@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -9,6 +10,7 @@ from aiogram.client.session.base import BaseSession
 from aiogram.methods import (
     AnswerCallbackQuery,
     DeleteMessage,
+    EditMessageText,
     SendChatAction,
     SendMessage,
     TelegramMethod,
@@ -20,7 +22,7 @@ from tests.modules.knowledge.test_service import _service, _settings
 from src.core.settings import Settings
 from src.handlers.errors import on_handler_error
 from src.handlers.handlers import build_router
-from src.handlers.text import COPY
+from src.handlers.text import COPY, interesting_fact_message
 from src.modules.knowledge.llm import LlmRequestError
 from src.modules.knowledge.service import KnowledgeService
 from src.modules.knowledge.types import SearchHit
@@ -33,6 +35,7 @@ class _RecordingSession(BaseSession):
         super().__init__()
         self._sent: list[tuple[int, str]] = []
         self.actions: list[str] = []
+        self.revisions: list[str] = []
         self._message_id = 1
 
     @property
@@ -54,6 +57,7 @@ class _RecordingSession(BaseSession):
     ) -> TelegramType:
         if isinstance(method, SendMessage):
             self._message_id += 1
+            self.revisions.append(method.text)
             self._sent.append((self._message_id, method.text))
             chat_id = int(method.chat_id) if isinstance(method.chat_id, str) else method.chat_id
             return Message(
@@ -62,6 +66,12 @@ class _RecordingSession(BaseSession):
                 chat=Chat(id=chat_id, type="private"),
                 text=method.text,
             ).as_(bot)
+        if isinstance(method, EditMessageText):
+            self.revisions.append(method.text)
+            self._sent = [
+                (mid, method.text if mid == method.message_id else text) for mid, text in self._sent
+            ]
+            return True
         if isinstance(method, SendChatAction):
             self.actions.append(method.action)
             return True
@@ -86,10 +96,10 @@ def _hit() -> SearchHit:
 def _service_with(llm: object) -> KnowledgeService:
     service = _service(_settings(), llm)  # type: ignore[arg-type]
 
-    async def search(question: str) -> list[SearchHit]:
-        return [_hit()]
+    async def retrieve(question: str) -> tuple[list[SearchHit], str | None]:
+        return [_hit()], None
 
-    service.search = search  # type: ignore[method-assign]
+    service.retrieve = retrieve  # type: ignore[method-assign]
     return service
 
 
@@ -126,4 +136,124 @@ async def test_model_failure_sends_only_the_hitch(error: Exception) -> None:
     session = await _ask(_service_with(Boom()))
     assert session.texts == [COPY["error_llm"]]
     assert session.actions == ["typing"]
-    assert COPY["thinking"] not in session.texts
+    assert COPY["thinking_search"] not in session.texts
+    assert "📚 Нашёл 1 статью, формулирую…" in session.revisions
+
+
+@pytest.mark.asyncio
+async def test_slow_answer_replaces_the_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("src.handlers.handlers._SLOW_AFTER_SECONDS", 0.05)
+
+    class Slow:
+        async def complete(self, messages: list[dict[str, str]]) -> str:
+            await asyncio.sleep(0.25)
+            return "Ответ готов"
+
+    session = await _ask(_service_with(Slow()))
+    assert session.texts[0].startswith("Ответ готов")
+    assert COPY["thinking_search"] in session.revisions
+    assert "📚 Нашёл 1 статью, формулирую…" in session.revisions
+    assert COPY["thinking_slow"] in session.revisions
+    assert session.texts[0] != COPY["thinking_slow"]
+    found_at = session.revisions.index("📚 Нашёл 1 статью, формулирую…")
+    slow_at = session.revisions.index(COPY["thinking_slow"])
+    assert found_at < slow_at
+
+
+@pytest.mark.asyncio
+async def test_short_formulation_does_not_claim_a_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("src.handlers.handlers._SLOW_AFTER_SECONDS", 0.2)
+
+    class Quick:
+        async def complete(self, messages: list[dict[str, str]]) -> str:
+            await asyncio.sleep(0.05)
+            return "Ответ готов"
+
+    session = await _ask(_service_with(Quick()))
+    assert session.texts[0].startswith("Ответ готов")
+    assert "📚 Нашёл 1 статью, формулирую…" in session.revisions
+    assert COPY["thinking_slow"] not in session.revisions
+
+
+@pytest.mark.asyncio
+async def test_search_delay_does_not_spill_into_formulation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("src.handlers.handlers._SLOW_AFTER_SECONDS", 0.05)
+
+    class Quick:
+        async def complete(self, messages: list[dict[str, str]]) -> str:
+            return "Ответ готов"
+
+    service = _service_with(Quick())
+
+    async def retrieve(question: str) -> tuple[list[SearchHit], str | None]:
+        await asyncio.sleep(0.12)
+        return [_hit()], None
+
+    service.retrieve = retrieve  # type: ignore[method-assign]
+    session = await _ask(service)
+    slow_at = session.revisions.index(COPY["thinking_slow"])
+    found_at = session.revisions.index("📚 Нашёл 1 статью, формулирую…")
+    assert slow_at < found_at
+    assert session.revisions.count(COPY["thinking_slow"]) == 1
+    assert session.texts[0].startswith("Ответ готов")
+
+
+@pytest.mark.asyncio
+async def test_status_counts_found_articles_not_the_prompt_limit() -> None:
+    class Boom:
+        async def complete(self, messages: list[dict[str, str]]) -> str:
+            raise LlmRequestError("timeout")
+
+    service = _service_with(Boom())
+
+    async def retrieve(question: str) -> tuple[list[SearchHit], str | None]:
+        hits = [
+            SearchHit(
+                title=f"Статья {index}",
+                url=f"https://example/{index}",
+                body="текст",
+                is_paid=False,
+                score=0.9,
+            )
+            for index in range(4)
+        ]
+        hits.append(
+            SearchHit(
+                title="Дубль первой",
+                url="https://example/0",
+                body="тот же материал",
+                is_paid=False,
+                score=0.8,
+            )
+        )
+        return hits, None
+
+    service.retrieve = retrieve  # type: ignore[method-assign]
+    session = await _ask(service)
+    assert "📚 Нашёл 4 статьи, формулирую…" in session.revisions
+
+
+@pytest.mark.asyncio
+async def test_fact_follows_the_found_status_and_is_not_the_answer() -> None:
+    class Quick:
+        async def complete(self, messages: list[dict[str, str]]) -> str:
+            return "Ответ готов"
+
+    service = _service_with(Quick())
+
+    async def retrieve(question: str) -> tuple[list[SearchHit], str | None]:
+        return [_hit()], "Взносы уменьшают налог."
+
+    service.retrieve = retrieve  # type: ignore[method-assign]
+    session = await _ask(service)
+    fact = interesting_fact_message("Взносы уменьшают налог.")
+    found = "📚 Нашёл 1 статью, формулирую…"
+    assert session.texts[0].startswith("Ответ готов")
+    assert fact in session.texts
+    assert session.texts[0] != fact
+    assert session.revisions.index(found) < session.revisions.index(fact)
+    assert session.revisions.index(fact) < session.revisions.index(session.texts[0])
