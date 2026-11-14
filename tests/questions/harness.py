@@ -10,6 +10,7 @@ from aiogram.client.session.base import BaseSession
 from aiogram.methods import (
     AnswerCallbackQuery,
     DeleteMessage,
+    EditMessageText,
     SendChatAction,
     SendMessage,
     TelegramMethod,
@@ -108,6 +109,14 @@ class RecordingSession(BaseSession):
                 chat=Chat(id=chat_id, type="private"),
                 text=method.text,
             ).as_(bot)
+        if isinstance(method, EditMessageText):
+            try:
+                index = self._ids.index(method.message_id)
+            except ValueError:
+                return True
+            current = self._events[index]
+            self._events[index] = OutgoingMessage(method.text, current.buttons)
+            return True
         if isinstance(method, SendChatAction):
             return True
         if isinstance(method, DeleteMessage):
