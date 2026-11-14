@@ -22,7 +22,7 @@ from tests.modules.knowledge.test_service import _service, _settings
 from src.core.settings import Settings
 from src.handlers.errors import on_handler_error
 from src.handlers.handlers import build_router
-from src.handlers.text import COPY
+from src.handlers.text import COPY, interesting_fact_message
 from src.modules.knowledge.llm import LlmRequestError
 from src.modules.knowledge.service import KnowledgeService
 from src.modules.knowledge.types import SearchHit
@@ -96,10 +96,10 @@ def _hit() -> SearchHit:
 def _service_with(llm: object) -> KnowledgeService:
     service = _service(_settings(), llm)  # type: ignore[arg-type]
 
-    async def search(question: str) -> list[SearchHit]:
-        return [_hit()]
+    async def retrieve(question: str) -> tuple[list[SearchHit], str | None]:
+        return [_hit()], None
 
-    service.search = search  # type: ignore[method-assign]
+    service.retrieve = retrieve  # type: ignore[method-assign]
     return service
 
 
@@ -189,11 +189,11 @@ async def test_search_delay_does_not_spill_into_formulation(
 
     service = _service_with(Quick())
 
-    async def search(question: str) -> list[SearchHit]:
+    async def retrieve(question: str) -> tuple[list[SearchHit], str | None]:
         await asyncio.sleep(0.12)
-        return [_hit()]
+        return [_hit()], None
 
-    service.search = search  # type: ignore[method-assign]
+    service.retrieve = retrieve  # type: ignore[method-assign]
     session = await _ask(service)
     slow_at = session.revisions.index(COPY["thinking_slow"])
     found_at = session.revisions.index("📚 Нашёл 1 статью, формулирую…")
@@ -210,7 +210,7 @@ async def test_status_counts_found_articles_not_the_prompt_limit() -> None:
 
     service = _service_with(Boom())
 
-    async def search(question: str) -> list[SearchHit]:
+    async def retrieve(question: str) -> tuple[list[SearchHit], str | None]:
         hits = [
             SearchHit(
                 title=f"Статья {index}",
@@ -230,8 +230,30 @@ async def test_status_counts_found_articles_not_the_prompt_limit() -> None:
                 score=0.8,
             )
         )
-        return hits
+        return hits, None
 
-    service.search = search  # type: ignore[method-assign]
+    service.retrieve = retrieve  # type: ignore[method-assign]
     session = await _ask(service)
     assert "📚 Нашёл 4 статьи, формулирую…" in session.revisions
+
+
+@pytest.mark.asyncio
+async def test_fact_follows_the_found_status_and_is_not_the_answer() -> None:
+    class Quick:
+        async def complete(self, messages: list[dict[str, str]]) -> str:
+            return "Ответ готов"
+
+    service = _service_with(Quick())
+
+    async def retrieve(question: str) -> tuple[list[SearchHit], str | None]:
+        return [_hit()], "Взносы уменьшают налог."
+
+    service.retrieve = retrieve  # type: ignore[method-assign]
+    session = await _ask(service)
+    fact = interesting_fact_message("Взносы уменьшают налог.")
+    found = "📚 Нашёл 1 статью, формулирую…"
+    assert session.texts[0].startswith("Ответ готов")
+    assert fact in session.texts
+    assert session.texts[0] != fact
+    assert session.revisions.index(found) < session.revisions.index(fact)
+    assert session.revisions.index(fact) < session.revisions.index(session.texts[0])

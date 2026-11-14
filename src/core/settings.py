@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     ingest_chunk_size: int = 800
     rag_top_k: int = 5
     rag_score_threshold: float = 0.35
+    fact_score_threshold: float = 0.45
     rag_related_score_threshold: float = 0.27
     rag_clarify_score_gap: float = 0.06
     llm_base_url: str = ""

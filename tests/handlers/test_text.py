@@ -1,5 +1,11 @@
 from src.handlers.errors import handler_failure_key
-from src.handlers.text import COPY, FEEDBACK_BUTTONS, START_BUTTONS, found_articles_status
+from src.handlers.text import (
+    COPY,
+    FEEDBACK_BUTTONS,
+    START_BUTTONS,
+    found_articles_status,
+    interesting_fact_message,
+)
 
 
 def test_handler_texts_match_spec() -> None:
@@ -25,6 +31,10 @@ def test_handler_texts_match_spec() -> None:
         "Рад помочь! Спросите о любом вопросе бизнеса: налоги, учёт, маркетинг, продажи."
     )
     assert COPY["thinking_search"] == "🔎 Ищу в материалах…"
+    assert (
+        interesting_fact_message("Взносы уменьшают налог.")
+        == "💡 Кстати, у меня есть интересный факт: Взносы уменьшают налог."
+    )
     assert COPY["thinking_slow"] == "Ещё пара секунд"
     assert found_articles_status(1) == "📚 Нашёл 1 статью, формулирую…"
     assert found_articles_status(3) == "📚 Нашёл 3 статьи, формулирую…"

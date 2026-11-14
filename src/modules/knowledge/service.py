@@ -9,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.core.settings import Settings
 from src.data.repositories.chunks import ChunkRepository
-from src.handlers.text import COPY
+from src.data.repositories.facts import FactRepository
+from src.handlers.text import COPY, interesting_fact_message
 from src.modules.knowledge.clarify_rules import ProfileSnapshot, clarify_reply
 from src.modules.knowledge.decision import SearchOutcome, decide_outcome
 from src.modules.knowledge.embedder import Embedder
+from src.modules.knowledge.facts import chosen_fact
 from src.modules.knowledge.llm import LlmClient
 from src.modules.knowledge.outside import outside_reply
 from src.modules.knowledge.prompt import build_llm_messages
@@ -24,6 +26,7 @@ from src.modules.recommend.utm import slug_from_url, with_utm
 _CANDIDATE_LIMIT = 80
 _LLM_HITS = 3
 SourceProgress = Callable[[int], Awaitable[None]]
+FactProgress = Callable[[str], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,19 +57,39 @@ class KnowledgeService:
         search_query: str | None = None,
         profile: ProfileSnapshot | None = None,
         on_sources: SourceProgress | None = None,
+        on_fact: FactProgress | None = None,
     ) -> BotReply:
         early = outside_reply(question) or clarify_reply(question, profile)
         if early is not None:
             return BotReply(early)
-        hits = await self.search(search_query or question)
-        return await self.answer_from_hits(question, hits, profile=profile, on_sources=on_sources)
+        hits, fact = await self.retrieve(search_query or question)
+        return await self.answer_from_hits(
+            question,
+            hits,
+            profile=profile,
+            on_sources=on_sources,
+            on_fact=on_fact,
+            fact=fact,
+        )
 
     async def search(self, question: str) -> list[SearchHit]:
+        hits, _fact = await self.retrieve(question)
+        return hits
+
+    async def retrieve(self, question: str) -> tuple[list[SearchHit], str | None]:
         vector = await asyncio.to_thread(self.embedder.embed_query, expand_query(question))
         async with self.session_factory() as session:
             hits = await ChunkRepository(session).search_similar(
                 vector,
                 limit=max(self.settings.rag_top_k, _CANDIDATE_LIMIT),
+            )
+            nearest = await FactRepository(session).search_similar(vector, limit=1)
+        fact = None
+        if nearest:
+            fact = chosen_fact(
+                nearest[0].body,
+                nearest[0].score,
+                threshold=self.settings.fact_score_threshold,
             )
         hits = prefer_lexical_hit(collapse_by_url(hits, question), question)
         hits = hits[: self.settings.rag_top_k]
@@ -77,7 +100,7 @@ class KnowledgeService:
                 hits[0].score,
                 hits[0].title[:80],
             )
-        return hits
+        return hits, fact
 
     async def answer_from_hits(
         self,
@@ -86,6 +109,8 @@ class KnowledgeService:
         *,
         profile: ProfileSnapshot | None = None,
         on_sources: SourceProgress | None = None,
+        on_fact: FactProgress | None = None,
+        fact: str | None = None,
     ) -> BotReply:
         early = outside_reply(question) or clarify_reply(question, profile)
         if early is not None:
@@ -104,7 +129,13 @@ class KnowledgeService:
             outcome.kind,
             question[:120],
         )
-        return await self._render_outcome(question, outcome, on_sources=on_sources)
+        return await self._render_outcome(
+            question,
+            outcome,
+            on_sources=on_sources,
+            on_fact=on_fact,
+            fact=fact,
+        )
 
     async def _render_outcome(
         self,
@@ -112,6 +143,8 @@ class KnowledgeService:
         outcome: SearchOutcome,
         *,
         on_sources: SourceProgress | None = None,
+        on_fact: FactProgress | None = None,
+        fact: str | None = None,
     ) -> BotReply:
         if outcome.kind == "not_found":
             return BotReply(COPY["not_found"])
@@ -135,6 +168,8 @@ class KnowledgeService:
         found = _distinct_articles(outcome.hits)
         if on_sources is not None and found:
             await on_sources(found)
+        if on_fact is not None and fact:
+            await on_fact(interesting_fact_message(fact))
         return await self._answer_with_llm(question, outcome.hits)
 
     async def _answer_with_llm(self, question: str, hits: tuple[SearchHit, ...]) -> BotReply:
