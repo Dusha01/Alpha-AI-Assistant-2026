@@ -1,3 +1,7 @@
+<img src="docs/banner-top.svg" alt="Альфа-Курс. Помощник в Telegram." width="100%">
+
+<img src="docs/banner-stack.svg" alt="Python 3.12, aiogram, PostgreSQL, pgvector, SQLAlchemy, Alembic, Docker." width="100%">
+
 # Alpha-AI-Assistant-2026
 
 ИИ-помощник «Альфа-Курса» в Telegram. Отвечает по материалам платформы, подбирает курсы и шаблоны, помнит сферу и режим налога, ставит напоминания. Поиск идёт по векторам в PostgreSQL (pgvector), формулировку ответа пишет LLM с API, совместимым с OpenAI.
@@ -434,3 +438,5 @@ Pre-commit (husky) на индексированных файлах запуск
 | `Docker/` | Образы dev и prod |
 | `scripts/dev`, `scripts/prod` | Подъём и остановка стека |
 | `docs/data/content-schema.md` | Контракт таблиц дампа |
+
+<img src="docs/banner-bottom.svg" alt="Альфа-Курс. Знания, профиль, напоминания." width="100%">

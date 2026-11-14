@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 168" role="img">
+  <title>Альфа-Курс</title>
+  <rect width="1200" height="168" fill="#141311"/>
+  <rect x="582" y="42" width="36" height="3" fill="#E10600"/>
+  <text x="600" y="92" text-anchor="middle" fill="#F6F4F1" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="22">Альфа-Курс</text>
+  <text x="600" y="122" text-anchor="middle" fill="#9A958E" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" letter-spacing="2.4">знания  ·  профиль  ·  напоминания</text>
+</svg>
