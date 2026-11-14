@@ -8,7 +8,7 @@ settings = Settings()
 # Базовые настройки
 bind = f"{settings.api_host}:{settings.api_port}"
 workers = 1
-worker_class = "uvicorn.workers.UvicornWorker"
+worker_class = "src.core.worker.BotWorker"
 worker_connections = 1000
 max_requests = 1000
 max_requests_jitter = 100
