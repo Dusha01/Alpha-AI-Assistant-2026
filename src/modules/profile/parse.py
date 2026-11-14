@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.data.models.enums import BusinessStage
+from src.data.models.enums import BusinessStage, TaxMode
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,3 +33,14 @@ def parse_business_line(text: str) -> ParsedBusiness:
         return ParsedBusiness(sphere=sphere_part or None, stage=_detect_stage(tail))
     stage = _detect_stage(raw)
     return ParsedBusiness(sphere=raw, stage=stage)
+
+
+def mode_switch(text: str) -> TaxMode | None:
+    lowered = text.lower().replace("ё", "е")
+    if "патент" in lowered and "переш" in lowered:
+        return TaxMode.PATENT
+    if "усн" in lowered and "переш" in lowered:
+        return TaxMode.USN
+    if "самозанят" in lowered and "переш" in lowered:
+        return TaxMode.NPD
+    return None

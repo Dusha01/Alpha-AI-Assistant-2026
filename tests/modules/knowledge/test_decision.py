@@ -99,6 +99,28 @@ def test_followup_after_clarify_goes_to_answer() -> None:
     assert outcome.kind == "answer"
 
 
+def test_high_score_without_shared_words_still_answers() -> None:
+    outcome = decide_outcome(
+        [_hit("Регистрация бизнеса", 0.8, "общие сведения о старте")],
+        question="Как подать заявление в налоговую?",
+        answer_threshold=0.35,
+        related_threshold=0.27,
+        clarify_gap=0.06,
+    )
+    assert outcome.kind == "answer"
+
+
+def test_visa_against_china_article_is_not_found() -> None:
+    outcome = decide_outcome(
+        [_hit("Какие налоги платят в Китае", 0.9, "налоги и платежи в Китае")],
+        question="Как оформить визу в Китай за запчастями?",
+        answer_threshold=0.35,
+        related_threshold=0.27,
+        clarify_gap=0.06,
+    )
+    assert outcome.kind == "not_found"
+
+
 def test_china_visa_scenario_not_found() -> None:
     outcome = decide_outcome(
         [],

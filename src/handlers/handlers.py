@@ -1,8 +1,12 @@
 # Слой контракта. Хендлеры делегируют разбор входящего сообщения и не содержат правил.
 
+import asyncio
+import contextlib
+import re
 import uuid
 
 from aiogram import F, Router
+from aiogram.enums import ChatAction
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from loguru import logger
 
@@ -11,13 +15,20 @@ from src.handlers.incoming import RESET_DIALOG_KEYS, reply_key
 from src.handlers.telegram_text import split_telegram_text
 from src.handlers.text import COPY, FEEDBACK_BUTTONS, START_BUTTONS
 from src.modules.knowledge.follow_up import queries_for_turn
+from src.modules.knowledge.llm import LlmNotConfiguredError, LlmRequestError
 from src.modules.knowledge.service import BotReply, KnowledgeService
+from src.modules.profile.parse import mode_switch, parse_business_line
 from src.modules.profile.service import ProfileService
 from src.modules.recommend.service import RecommendReply, RecommendService
 from src.modules.reminders.keyboards import REPEAT_BUTTONS
 from src.modules.reminders.service import ReminderService
 
 _BUTTON_ACTIONS = ("ask", "materials", "remind")
+_TYPING_REFRESH_SECONDS = 4.0
+_READING_INTENT = re.compile(
+    r"(?:что(?:\s+мне)?\s+(?:почитать|посмотреть)|с чего начать)",
+    re.IGNORECASE,
+)
 
 
 def log_handler(
@@ -67,6 +78,59 @@ def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+class _Thinking:
+    def __init__(
+        self,
+        placeholder: Message,
+        stop: asyncio.Event,
+        task: asyncio.Task[None],
+    ) -> None:
+        self.placeholder = placeholder
+        self.stop = stop
+        self.task = task
+        self.closed = False
+
+    async def finish(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        self.stop.set()
+        self.task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self.task
+        try:
+            await self.placeholder.delete()
+        except Exception as exc:
+            logger.warning("Не удалось убрать сообщение «Думаю»: {}", exc)
+
+
+async def _typing_until(message: Message, stop: asyncio.Event) -> None:
+    while True:
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=_TYPING_REFRESH_SECONDS)
+            return
+        except TimeoutError:
+            pass
+        try:
+            await message.bot.send_chat_action(message.chat.id, action=ChatAction.TYPING)
+        except Exception:
+            return
+
+
+async def _begin_thinking(message: Message) -> _Thinking | None:
+    if message.bot is None:
+        return None
+    try:
+        await message.bot.send_chat_action(message.chat.id, action=ChatAction.TYPING)
+        placeholder = await message.answer(COPY["thinking"])
+    except Exception as exc:
+        logger.warning("Не удалось показать, что бот печатает: {}", exc)
+        return None
+    stop = asyncio.Event()
+    task = asyncio.create_task(_typing_until(message, stop))
+    return _Thinking(placeholder, stop, task)
+
+
 async def deliver_knowledge(
     message: Message,
     knowledge: KnowledgeService,
@@ -74,32 +138,59 @@ async def deliver_knowledge(
     recommend: RecommendService | None,
     user_id: uuid.UUID | None,
 ) -> None:
-    previous_question = None
-    previous_material = None
-    if profile is not None and user_id is not None:
-        previous_question, previous_material = await profile.follow_up_context(user_id)
-    question, search_query = queries_for_turn(
-        (message.text or "").strip(),
-        previous_question=previous_question,
-        previous_material=previous_material,
-    )
-    reply: BotReply = await knowledge.answer_question(question, search_query=search_query)
-    for part in split_telegram_text(reply.text):
-        await message.answer(part)
-    if reply.material_title and profile is not None and user_id is not None:
-        await profile.remember_follow_up(user_id, question, reply.material_title)
-    if not reply.feedback:
-        return
-    if recommend is not None and user_id is not None:
-        await recommend.remember_topic(user_id, question)
-    await message.answer(COPY["feedback"], reply_markup=feedback_keyboard())
-    if (
-        profile is not None
-        and user_id is not None
-        and await profile.should_offer_business_prompt(user_id)
-    ):
-        follow = await profile.start_business_prompt(user_id)
-        await message.answer(follow.text, reply_markup=follow.markup)
+    thinking = await _begin_thinking(message)
+    sent = False
+    try:
+        previous_question = None
+        previous_material = None
+        snapshot = None
+        if profile is not None and user_id is not None:
+            previous_question, previous_material = await profile.follow_up_context(user_id)
+            snapshot = await profile.knowledge_snapshot(user_id)
+        question, search_query = queries_for_turn(
+            (message.text or "").strip(),
+            previous_question=previous_question,
+            previous_material=previous_material,
+        )
+        reply: BotReply = await knowledge.answer_question(
+            question,
+            search_query=search_query,
+            profile=snapshot,
+        )
+        if thinking is not None:
+            await thinking.finish()
+        for part in split_telegram_text(reply.text):
+            await message.answer(part)
+            sent = True
+        if reply.material_title and profile is not None and user_id is not None:
+            await profile.remember_follow_up(user_id, question, reply.material_title)
+        if not reply.feedback:
+            return
+        if recommend is not None and user_id is not None:
+            await recommend.remember_topic(user_id, question)
+        await message.answer(COPY["feedback"], reply_markup=feedback_keyboard())
+        if (
+            profile is not None
+            and user_id is not None
+            and await profile.should_offer_business_prompt(user_id)
+        ):
+            follow = await profile.start_business_prompt(user_id)
+            await message.answer(follow.text, reply_markup=follow.markup)
+    except Exception as exc:
+        logger.exception("Не удалось ответить на вопрос")
+        if thinking is not None:
+            await thinking.finish()
+        if sent:
+            return
+        key = (
+            "error_llm"
+            if isinstance(exc, (LlmRequestError, LlmNotConfiguredError))
+            else "error_general"
+        )
+        await message.answer(COPY[key])
+    finally:
+        if thinking is not None:
+            await thinking.finish()
 
 
 def build_router(
@@ -158,6 +249,29 @@ def build_router(
             user = await profile.ensure_user(message.from_user.id, message.from_user.username)
             reply = await reminders.start_quick(user.id, (message.text or "").strip())
             await message.answer(reply.text, reply_markup=reply.markup)
+            return
+        if key == "smalltalk" and profile is not None and user is not None:
+            switched = mode_switch(message.text or "")
+            if switched is not None:
+                reply = await profile.remember_mode(user.id, switched)
+                await message.answer(reply.text, reply_markup=reply.markup)
+                return
+            parsed = parse_business_line(message.text or "")
+            snapshot = await profile.knowledge_snapshot(user.id)
+            if parsed.sphere and parsed.stage is not None and not (snapshot.sphere or "").strip():
+                reply = await profile.accept_business_line(user.id, (message.text or "").strip())
+                await message.answer(reply.text, reply_markup=reply.markup)
+                if recommend is not None and not await profile.is_in_dialog(user.id):
+                    await deliver_recommendations(message, user.id, recommend)
+                return
+        if (
+            key == "smalltalk"
+            and recommend is not None
+            and profile is not None
+            and user is not None
+            and _READING_INTENT.search(message.text or "")
+        ):
+            await deliver_recommendations(message, user.id, recommend, prefer_route=True)
             return
         if (
             key == "smalltalk"
@@ -269,6 +383,9 @@ def build_router(
         if query.data in _BUTTON_ACTIONS and profile is not None and query.from_user is not None:
             user = await profile.ensure_user(query.from_user.id, query.from_user.username)
             await profile.reset_dialog(user.id)
+        if query.data == "ask" and query.message is not None:
+            await query.message.answer(COPY["smalltalk"])
+            return
         if (
             query.data == "materials"
             and recommend is not None

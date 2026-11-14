@@ -44,3 +44,5 @@ def test_prompt_does_not_include_telegram_id() -> None:
         ),
     )
     assert not prompt_contains_forbidden_data(messages, "123456789")
+    assert "без текста уроков" in messages[0]["content"]
+    assert "Другие банки не называйте" in messages[0]["content"]

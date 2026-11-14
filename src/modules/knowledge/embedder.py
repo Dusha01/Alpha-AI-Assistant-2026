@@ -38,6 +38,9 @@ class LazySentenceTransformerEmbedder:
     def embed_query(self, text: str) -> list[float]:
         return self._get().embed_query(text)
 
+    def warmup(self) -> None:
+        self.embed_query("прогрев")
+
 
 class SentenceTransformerEmbedder:
     def __init__(self, model_name: str) -> None:

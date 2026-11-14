@@ -2,6 +2,7 @@ import pytest
 
 from src.core.app import app, poll
 from src.core.settings import Settings
+from src.modules.knowledge.embedder import LazySentenceTransformerEmbedder
 
 
 @pytest.mark.asyncio
@@ -78,6 +79,15 @@ async def test_polling_leaves_signals_to_the_server(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr("aiogram.Bot", Bot)
     monkeypatch.setattr("aiogram.Dispatcher", Dispatcher)
     monkeypatch.setattr("aiogram.client.session.aiohttp.AiohttpSession", Session)
+    warmed: list[str] = []
+
+    def warmup(self: LazySentenceTransformerEmbedder) -> None:
+        warmed.append(self.model_name)
+
+    monkeypatch.setattr(
+        "src.modules.knowledge.embedder.LazySentenceTransformerEmbedder.warmup",
+        warmup,
+    )
 
     class _Engine:
         async def dispose(self) -> None:
@@ -96,13 +106,13 @@ async def test_polling_leaves_signals_to_the_server(monkeypatch: pytest.MonkeyPa
         lambda engine: lambda: _Factory(),
     )
 
-    await poll(
-        Settings(
-            _env_file=None,
-            telegram_bot_token="123:test",
-            telegram_proxy_url=None,
-            database_url="postgresql+asyncpg://alfa:pass@localhost/alfa_course",
-        )
+    settings = Settings(
+        _env_file=None,
+        telegram_bot_token="123:test",
+        telegram_proxy_url=None,
+        database_url="postgresql+asyncpg://alfa:pass@localhost/alfa_course",
     )
+    await poll(settings)
 
     assert captured["kwargs"]["handle_signals"] is False
+    assert warmed == [settings.embedding_model]

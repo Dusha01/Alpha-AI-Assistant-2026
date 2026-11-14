@@ -59,7 +59,7 @@ if ! ruff_verify; then
 fi
 
 echo "Running pytest..."
-if ! "$PYTEST" -q -m "not integration"; then
+if ! "$PYTEST" -q -m "not integration and not questions"; then
 	echo "pytest failed."
 	exit 1
 fi

@@ -62,6 +62,25 @@ def _parse_clock(fragment: str) -> time | None:
     return None
 
 
+def _parse_hour_words(fragment: str) -> time | None:
+    match = re.search(r"(\d{1,2})\s*(утра|вечера|дня|ночи)", fragment)
+    if match is None:
+        return None
+    hour = int(match.group(1))
+    part = match.group(2)
+    if hour > 23:
+        return None
+    if part == "вечера" and 1 <= hour <= 11:
+        hour += 12
+    if part == "дня" and 1 <= hour <= 7:
+        hour += 12
+    if part == "утра" and hour == 12:
+        hour = 0
+    if part == "ночи" and hour == 12:
+        hour = 0
+    return time(hour, 0)
+
+
 def _next_weekday(local_now: datetime, weekday: int, tz: ZoneInfo) -> datetime:
     today = local_now.weekday()
     delta = (weekday - today) % 7
@@ -99,7 +118,14 @@ def parse_when(text: str, now: datetime, *, tz_name: str = "Asia/Vladivostok"):
             delta = timedelta(days=amount)
         return ParsedTime(local_now + delta)
 
-    clock = _parse_clock(lowered)
+    clock = _parse_clock(lowered) or _parse_hour_words(lowered)
+    if "вчера" in lowered:
+        day = (local_now - timedelta(days=1)).date()
+        when = _combine(day, clock or time(9, 0), tz)
+        if when <= local_now:
+            return TimeParseError("past")
+        return ParsedTime(when)
+
     if "сегодня" in lowered and clock is not None:
         when = _combine(local_now.date(), clock, tz)
         if when <= local_now:

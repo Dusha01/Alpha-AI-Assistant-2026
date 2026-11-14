@@ -112,5 +112,52 @@ async def test_credit_question_triggers_clarify_copy() -> None:
             ),
         ],
     )
-    assert "Кредит для ИП" in reply.text
-    assert "Ипотека для бизнеса" in reply.text
+    assert "открытие бизнеса" in reply.text
+    assert "оборотные средства" in reply.text
+
+
+@pytest.mark.asyncio
+async def test_visa_question_does_not_call_llm() -> None:
+    class Boom:
+        async def complete(self, messages: list[dict[str, str]]) -> str:
+            raise AssertionError(messages)
+
+    service = _service(_settings(), Boom())  # type: ignore[arg-type]
+    reply = await service.answer_from_hits(
+        "Как оформить визу в Китай за запчастями?",
+        [
+            SearchHit(
+                title="Какие налоги платят в Китае",
+                url="https://example/china",
+                body="налоги в Китае",
+                is_paid=False,
+                score=0.91,
+            )
+        ],
+    )
+    assert reply.text == COPY["not_found_visa"]
+    assert reply.feedback is False
+
+
+@pytest.mark.asyncio
+async def test_unexpected_llm_error_returns_hitch() -> None:
+    class Boom:
+        async def complete(self, messages: list[dict[str, str]]) -> str:
+            raise RuntimeError(messages)
+
+    service = _service(_settings(), Boom())  # type: ignore[arg-type]
+
+    async def search(question: str) -> list[SearchHit]:
+        return [
+            SearchHit(
+                title="Учёт на УСН",
+                url="https://example/usn",
+                body="Как вести учёт доходов на УСН",
+                is_paid=False,
+                score=0.9,
+            )
+        ]
+
+    service.search = search  # type: ignore[method-assign]
+    reply = await service.answer_question("Как вести учёт доходов на УСН?")
+    assert reply.text == COPY["error_llm"]

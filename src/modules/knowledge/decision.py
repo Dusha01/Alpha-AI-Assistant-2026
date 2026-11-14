@@ -5,6 +5,7 @@ from typing import Literal
 
 from src.modules.knowledge.relevance import (
     is_vague_question,
+    mandatory_terms,
     material_covers_question,
     question_aligns_with_title,
     significant_terms,
@@ -53,9 +54,12 @@ def decide_outcome(
     best = ranked[0]
     if best.score < related_threshold:
         return SearchOutcome(kind="not_found")
-    if question and not material_covers_question(question, best):
+    covers = not question or material_covers_question(question, best)
+    if question and mandatory_terms(question) and not covers:
         return SearchOutcome(kind="not_found")
     if best.score < answer_threshold:
+        if not covers:
+            return SearchOutcome(kind="not_found")
         return SearchOutcome(kind="not_found_related", hits=(best,))
     if question and question_aligns_with_title(question, best.title):
         return SearchOutcome(kind="answer", hits=ranked)
