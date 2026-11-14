@@ -1,6 +1,6 @@
 import pytest
 
-from src.core.app import app, poll
+from src.core.app import _serve_polling, app, poll
 from src.core.settings import Settings
 from src.modules.knowledge.embedder import LazySentenceTransformerEmbedder
 
@@ -116,3 +116,21 @@ async def test_polling_leaves_signals_to_the_server(monkeypatch: pytest.MonkeyPa
 
     assert captured["kwargs"]["handle_signals"] is False
     assert warmed == [settings.embedding_model]
+
+
+@pytest.mark.asyncio
+async def test_polling_retries_when_telegram_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    class Dispatcher:
+        async def start_polling(self, bot: object, **kwargs: object) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise ConnectionError("api.telegram.org")
+
+    monkeypatch.setattr("src.core.app._POLL_RETRY_SECONDS", 0)
+    await _serve_polling(Dispatcher(), object())
+    assert calls == 2

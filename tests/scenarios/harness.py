@@ -12,6 +12,7 @@ from aiogram.client.session.base import BaseSession
 from aiogram.methods import (
     AnswerCallbackQuery,
     DeleteMessage,
+    EditMessageText,
     SendChatAction,
     SendMessage,
     TelegramMethod,
@@ -60,6 +61,7 @@ class ScriptedKnowledge:
         *,
         search_query: str | None = None,
         profile: object | None = None,
+        on_sources: object | None = None,
     ) -> BotReply:
         self.calls.append((question, search_query))
         if question in self.fail:
@@ -129,6 +131,9 @@ class RecordingSession(BaseSession):
                 chat=Chat(id=chat_id, type="private"),
                 text=method.text,
             ).as_(bot)
+        if isinstance(method, EditMessageText):
+            self._replace(method.message_id, method.text)
+            return True
         if isinstance(method, SendChatAction):
             return True
         if isinstance(method, DeleteMessage):
@@ -139,6 +144,15 @@ class RecordingSession(BaseSession):
             self._ids.append(None)
             return True
         raise AssertionError(f"unexpected method {type(method).__name__}")
+
+    def _replace(self, message_id: int, text: str) -> None:
+        try:
+            index = self._ids.index(message_id)
+        except ValueError:
+            return
+        kind, payload = self._events[index]
+        if kind == "message" and isinstance(payload, OutgoingMessage):
+            self._events[index] = ("message", OutgoingMessage(text, payload.buttons))
 
     def _drop(self, message_id: int) -> None:
         try:

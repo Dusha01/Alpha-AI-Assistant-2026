@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from loguru import logger
@@ -21,6 +22,8 @@ from src.modules.knowledge.types import SearchHit
 from src.modules.recommend.utm import slug_from_url, with_utm
 
 _CANDIDATE_LIMIT = 80
+_LLM_HITS = 3
+SourceProgress = Callable[[int], Awaitable[None]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,12 +53,13 @@ class KnowledgeService:
         *,
         search_query: str | None = None,
         profile: ProfileSnapshot | None = None,
+        on_sources: SourceProgress | None = None,
     ) -> BotReply:
         early = outside_reply(question) or clarify_reply(question, profile)
         if early is not None:
             return BotReply(early)
         hits = await self.search(search_query or question)
-        return await self.answer_from_hits(question, hits, profile=profile)
+        return await self.answer_from_hits(question, hits, profile=profile, on_sources=on_sources)
 
     async def search(self, question: str) -> list[SearchHit]:
         vector = await asyncio.to_thread(self.embedder.embed_query, expand_query(question))
@@ -81,6 +85,7 @@ class KnowledgeService:
         hits: list[SearchHit],
         *,
         profile: ProfileSnapshot | None = None,
+        on_sources: SourceProgress | None = None,
     ) -> BotReply:
         early = outside_reply(question) or clarify_reply(question, profile)
         if early is not None:
@@ -99,9 +104,15 @@ class KnowledgeService:
             outcome.kind,
             question[:120],
         )
-        return await self._render_outcome(question, outcome)
+        return await self._render_outcome(question, outcome, on_sources=on_sources)
 
-    async def _render_outcome(self, question: str, outcome: SearchOutcome) -> BotReply:
+    async def _render_outcome(
+        self,
+        question: str,
+        outcome: SearchOutcome,
+        *,
+        on_sources: SourceProgress | None = None,
+    ) -> BotReply:
         if outcome.kind == "not_found":
             return BotReply(COPY["not_found"])
         if outcome.kind == "not_found_related":
@@ -121,13 +132,16 @@ class KnowledgeService:
             )
         if outcome.kind == "clarify_free":
             return BotReply(COPY["clarify_free"])
+        found = _distinct_articles(outcome.hits)
+        if on_sources is not None and found:
+            await on_sources(found)
         return await self._answer_with_llm(question, outcome.hits)
 
     async def _answer_with_llm(self, question: str, hits: tuple[SearchHit, ...]) -> BotReply:
         if not self.settings.llm_api_key.strip():
             return BotReply(COPY["error_llm"])
         try:
-            messages = build_llm_messages(question, hits[:3])
+            messages = build_llm_messages(question, hits[:_LLM_HITS])
             llm_text = await self.llm.complete(messages)
             primary = hits[0]
             url = _public_url(primary.url)
@@ -140,6 +154,15 @@ class KnowledgeService:
         except Exception as exc:
             logger.warning("LLM недоступен: {}", exc)
             return BotReply(COPY["error_llm"])
+
+
+def _distinct_articles(hits: tuple[SearchHit, ...]) -> int:
+    seen: set[str] = set()
+    for hit in hits:
+        key = (hit.url or "").strip() or hit.title.strip()
+        if key:
+            seen.add(key)
+    return len(seen)
 
 
 def _public_url(url: str | None) -> str:

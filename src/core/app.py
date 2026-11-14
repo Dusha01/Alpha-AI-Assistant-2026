@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import os
 from collections.abc import Awaitable, Callable
+from typing import Protocol
 
 from loguru import logger
 
@@ -14,6 +15,21 @@ Receive = Callable[[], Awaitable[dict]]
 Send = Callable[[dict], Awaitable[None]]
 
 _poll_task: asyncio.Task[None] | None = None
+_POLL_RETRY_SECONDS = 5.0
+
+
+class _Warmable(Protocol):
+    def warmup(self) -> None: ...
+
+
+class _Poller(Protocol):
+    def start_polling(
+        self,
+        bot: object,
+        *,
+        handle_signals: bool,
+        close_bot_session: bool,
+    ) -> Awaitable[None]: ...
 
 
 async def poll(settings: Settings) -> None:
@@ -54,9 +70,7 @@ async def poll(settings: Settings) -> None:
     reminders = ReminderService(settings=settings, session_factory=session_factory)
     dispatcher.include_router(build_router(settings, knowledge, profiles, recommend, reminders))
     dispatcher.errors.register(on_handler_error)
-    logger.info("Прогрев модели эмбеддингов {}", settings.embedding_model)
-    await asyncio.to_thread(embedder.warmup)
-    logger.info("Модель эмбеддингов готова")
+    polling_task = asyncio.create_task(_serve_polling(dispatcher, bot))
     poller_task = asyncio.create_task(
         run_reminder_poller(
             bot,
@@ -66,8 +80,13 @@ async def poll(settings: Settings) -> None:
         )
     )
     try:
-        await dispatcher.start_polling(bot, handle_signals=False, close_bot_session=False)
+        await _warmup_embedder(embedder, settings.embedding_model)
+        await polling_task
     finally:
+        if not polling_task.done():
+            polling_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await polling_task
         poller_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await poller_task
@@ -75,12 +94,51 @@ async def poll(settings: Settings) -> None:
         await engine.dispose()
 
 
+async def _warmup_embedder(embedder: _Warmable, model_name: str) -> None:
+    try:
+        logger.info("Прогрев модели эмбеддингов {}", model_name)
+        await asyncio.to_thread(embedder.warmup)
+        logger.info("Модель эмбеддингов готова")
+    except Exception:
+        logger.exception("Не удалось прогреть модель эмбеддингов")
+
+
+async def _serve_polling(dispatcher: _Poller, bot: object) -> None:
+    """Держит long polling, пока процесс жив. Сбой сети не гасит health."""
+    while True:
+        try:
+            await dispatcher.start_polling(
+                bot,
+                handle_signals=False,
+                close_bot_session=False,
+            )
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Опрос Telegram не запущен, повтор через {} с",
+                _POLL_RETRY_SECONDS,
+            )
+            await asyncio.sleep(_POLL_RETRY_SECONDS)
+
+
+def _log_poll_task(task: asyncio.Task[None]) -> None:
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        logger.opt(exception=error).error("Опрос Telegram завершился")
+
+
 def _start_polling_if_configured(settings: Settings) -> asyncio.Task[None] | None:
     if not settings.telegram_bot_token.strip():
         logger.error("TELEGRAM_BOT_TOKEN пуст. Опрос Telegram не запущен.")
         return None
     log_telegram_proxy_mode(settings.telegram_proxy_url)
-    return asyncio.create_task(poll(settings))
+    task = asyncio.create_task(poll(settings))
+    task.add_done_callback(_log_poll_task)
+    return task
 
 
 async def _lifespan(receive: Receive, send: Send) -> None:
