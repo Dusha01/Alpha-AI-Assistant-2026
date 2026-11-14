@@ -62,6 +62,7 @@ class ScriptedKnowledge:
         search_query: str | None = None,
         profile: object | None = None,
         on_sources: object | None = None,
+        on_fact: object | None = None,
     ) -> BotReply:
         self.calls.append((question, search_query))
         if question in self.fail:

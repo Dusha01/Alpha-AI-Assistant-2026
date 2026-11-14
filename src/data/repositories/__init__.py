@@ -1,6 +1,7 @@
 from src.data.repositories.base import BaseRepository
 from src.data.repositories.chunks import ChunkRepository
 from src.data.repositories.dialog_states import DialogStateRepository
+from src.data.repositories.facts import FactRepository
 from src.data.repositories.profiles import ProfileRepository
 from src.data.repositories.users import UserRepository
 
@@ -8,6 +9,7 @@ __all__ = [
     "BaseRepository",
     "ChunkRepository",
     "DialogStateRepository",
+    "FactRepository",
     "ProfileRepository",
     "UserRepository",
 ]

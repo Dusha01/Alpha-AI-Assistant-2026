@@ -223,11 +223,18 @@ async def deliver_knowledge(
             if thinking is not None and count > 0:
                 await thinking.show(found_articles_status(count))
 
+        async def _note_fact(text: str) -> None:
+            try:
+                await message.answer(text)
+            except Exception as exc:
+                logger.warning("Не удалось отправить факт: {}", exc)
+
         reply: BotReply = await knowledge.answer_question(
             question,
             search_query=search_query,
             profile=snapshot,
             on_sources=_note_sources,
+            on_fact=_note_fact,
         )
         parts = split_telegram_text(reply.text)
         if thinking is not None and parts:

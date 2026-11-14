@@ -1,3 +1,7 @@
+def interesting_fact_message(fact: str) -> str:
+    return COPY["interesting_fact"].replace("{fact}", fact, 1)
+
+
 def found_articles_status(count: int) -> str:
     """Статус «нашёл N статей» с правильным падежом."""
     remainder = count % 100
@@ -43,6 +47,7 @@ COPY: dict[str, str] = {
         "Рад помочь! Спросите о любом вопросе бизнеса: налоги, учёт, маркетинг, продажи."
     ),
     "thinking_search": "🔎 Ищу в материалах…",
+    "interesting_fact": "💡 Кстати, у меня есть интересный факт: {fact}",
     "thinking_slow": "Ещё пара секунд",
     "error_general": "Что-то пошло не так. Попробуйте ещё раз или отправьте /start.",
     "too_long": (
